@@ -1,65 +1,52 @@
-import Image from "next/image";
+import { StatCard } from "@/components/stat-card";
+import { EquityCurve } from "@/components/equity-curve";
+import { PositionsTable } from "@/components/positions-table";
 
-export default function Home() {
+const mockEquityData = [
+  { date: "2024-01", value: 100000 },
+  { date: "2024-02", value: 105000 },
+  { date: "2024-03", value: 102000 },
+  { date: "2024-04", value: 110000 },
+  { date: "2024-05", value: 108000 },
+  { date: "2024-06", value: 115000 },
+  { date: "2024-07", value: 112000 },
+  { date: "2024-08", value: 120000 },
+  { date: "2024-09", value: 118000 },
+  { date: "2024-10", value: 125000 },
+  { date: "2024-11", value: 130000 },
+  { date: "2024-12", value: 128000 },
+];
+
+const mockPositions = [
+  { symbol: "AAPL", name: "Apple Inc.", market: "US", quantity: 100, avgCost: 150, currentPrice: 185, marketValue: 18500, pnl: 3500, pnlPercent: 23.33, currency: "USD" },
+  { symbol: "0700.HK", name: "腾讯控股", market: "HK", quantity: 200, avgCost: 320, currentPrice: 380, marketValue: 76000, pnl: 12000, pnlPercent: 18.75, currency: "HKD" },
+  { symbol: "600519.SS", name: "贵州茅台", market: "A", quantity: 10, avgCost: 1680, currentPrice: 1750, marketValue: 17500, pnl: 700, pnlPercent: 4.17, currency: "CNY" },
+];
+
+export default function Dashboard() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+    <div className="space-y-8">
+      <div>
+        <h1 className="text-2xl font-bold">投资仪表盘</h1>
+        <p className="text-muted mt-1">总览你的投资组合表现</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard title="总资产" value="$128,000" subtitle="USD" />
+        <StatCard title="今日盈亏" value="+$2,000" change="+1.59%" changePositive />
+        <StatCard title="本月收益" value="+$5,000" change="+4.07%" changePositive />
+        <StatCard title="最大回撤" value="-5.8%" subtitle="2024年3月" />
+      </div>
+
+      <div className="bg-card border border-default rounded-xl p-6">
+        <h2 className="text-lg font-semibold mb-4">资产曲线</h2>
+        <EquityCurve data={mockEquityData} />
+      </div>
+
+      <div>
+        <h2 className="text-lg font-semibold mb-4">当前持仓</h2>
+        <PositionsTable positions={mockPositions} />
+      </div>
     </div>
   );
 }
