@@ -1,6 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { IbkrConfig } from "@/components/ibkr-config";
+import { IbkrSync } from "@/components/ibkr-sync";
+import { XmlImporter } from "@/components/xml-importer";
+import { CsvImporter } from "@/components/csv-importer";
 
 interface Account {
   id: string;
@@ -15,6 +19,7 @@ export function AccountManager() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [broker, setBroker] = useState("MANUAL");
   const [currency, setCurrency] = useState("USD");
@@ -27,11 +32,14 @@ export function AccountManager() {
       if (res.ok) {
         const data = await res.json();
         setAccounts(data);
+        if (data.length > 0 && !expandedId) {
+          setExpandedId(data[0].id);
+        }
       }
     } catch {} finally {
       setLoading(false);
     }
-  }, []);
+  }, [expandedId]);
 
   useEffect(() => {
     fetchAccounts();
@@ -76,6 +84,7 @@ export function AccountManager() {
     try {
       const res = await fetch(`/api/accounts?id=${id}`, { method: "DELETE" });
       if (res.ok) {
+        if (expandedId === id) setExpandedId(null);
         fetchAccounts();
       }
     } catch {}
@@ -92,53 +101,90 @@ export function AccountManager() {
     return <div className="text-sm text-muted">加载中...</div>;
   }
 
+  const expandedAccount = accounts.find((a) => a.id === expandedId);
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {accounts.length === 0 ? (
         <div className="text-center py-8 text-muted border border-default rounded-xl">
-          暂无账户，请添加
+          暂无账户，请先添加
         </div>
       ) : (
-        <div className="border border-default rounded-xl overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-default bg-muted/50">
-                <th className="text-left py-3 px-4 text-sm font-medium text-muted">名称</th>
-                <th className="text-left py-3 px-4 text-sm font-medium text-muted">券商</th>
-                <th className="text-left py-3 px-4 text-sm font-medium text-muted">币种</th>
-                <th className="text-left py-3 px-4 text-sm font-medium text-muted">IBKR</th>
-                <th className="text-left py-3 px-4 text-sm font-medium text-muted">创建时间</th>
-                <th className="text-right py-3 px-4 text-sm font-medium text-muted">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {accounts.map((account) => (
-                <tr key={account.id} className="border-b border-default last:border-0 hover:bg-accent/50">
-                  <td className="py-3 px-4 text-sm font-medium">{account.name}</td>
-                  <td className="py-3 px-4 text-sm">{brokerLabels[account.broker] || account.broker}</td>
-                  <td className="py-3 px-4 text-sm">{account.currency}</td>
-                  <td className="py-3 px-4 text-sm">
-                    {account.hasIbkrConfig ? (
-                      <span className="text-green">已配置</span>
-                    ) : (
-                      <span className="text-muted">—</span>
-                    )}
-                  </td>
-                  <td className="py-3 px-4 text-sm text-muted">
+        <div className="space-y-2">
+          {accounts.map((account) => (
+            <div key={account.id} className="border border-default rounded-xl overflow-hidden">
+              <button
+                onClick={() => setExpandedId(expandedId === account.id ? null : account.id)}
+                className="w-full flex items-center justify-between p-4 hover:bg-accent/50 transition-colors text-left"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="text-left">
+                    <div className="font-medium text-sm">{account.name}</div>
+                    <div className="text-xs text-muted">
+                      {brokerLabels[account.broker] || account.broker} · {account.currency}
+                      {account.hasIbkrConfig && <span className="text-green ml-2">IBKR 已配置</span>}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-muted">
                     {new Date(account.createdAt).toLocaleDateString("zh-CN")}
-                  </td>
-                  <td className="py-3 px-4 text-right">
-                    <button
-                      onClick={() => handleDelete(account.id, account.name)}
-                      className="text-sm text-red hover:underline"
-                    >
-                      删除
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(account.id, account.name);
+                    }}
+                    className="text-xs text-red hover:underline"
+                  >
+                    删除
+                  </button>
+                  <svg
+                    className={`h-4 w-4 text-muted transition-transform ${expandedId === account.id ? "rotate-180" : ""}`}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+              </button>
+
+              {expandedId === account.id && (
+                <div className="border-t border-default p-4 space-y-6 bg-muted/20">
+                  {account.broker === "IBKR" && (
+                    <div className="space-y-4">
+                      <h4 className="text-sm font-medium">IBKR 数据同步</h4>
+                      <IbkrConfig />
+                      <div className="border-t border-default pt-4">
+                        <IbkrSync />
+                      </div>
+                    </div>
+                  )}
+
+                  {account.broker === "MANUAL" && (
+                    <div className="text-sm text-muted">
+                      手动录入账户。可通过下方 CSV 导入或手动添加交易记录。
+                    </div>
+                  )}
+
+                  <div className="border-t border-default pt-4 space-y-4">
+                    <h4 className="text-sm font-medium">数据导入</h4>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      <div>
+                        <h5 className="text-xs text-muted mb-2">CSV 导入</h5>
+                        <CsvImporter />
+                      </div>
+                      <div>
+                        <h5 className="text-xs text-muted mb-2">IBKR Flex XML 导入</h5>
+                        <XmlImporter />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
 

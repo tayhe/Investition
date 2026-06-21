@@ -5,7 +5,7 @@ export default function AccountsPage() {
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold">账户管理</h1>
-        <p className="text-muted mt-1">管理你的券商账户和手动录入账户</p>
+        <p className="text-muted mt-1">管理券商账户、配置数据同步和导入交易记录</p>
       </div>
       <AccountManager />
     </div>
