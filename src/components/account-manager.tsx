@@ -28,6 +28,7 @@ export function AccountManager() {
   const [currency, setCurrency] = useState("USD");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [initialized, setInitialized] = useState(false);
 
   const fetchAccounts = useCallback(async () => {
     try {
@@ -35,14 +36,15 @@ export function AccountManager() {
       if (res.ok) {
         const data = await res.json();
         setAccounts(data);
-        if (data.length > 0 && !expandedId) {
+        if (!initialized && data.length > 0) {
           setExpandedId(data[0].id);
+          setInitialized(true);
         }
       }
     } catch {} finally {
       setLoading(false);
     }
-  }, [expandedId]);
+  }, [initialized]);
 
   useEffect(() => {
     fetchAccounts();
