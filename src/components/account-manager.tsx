@@ -105,7 +105,6 @@ export function AccountManager() {
       });
       if (res.ok) {
         setEditingId(null);
-        setExpandedId(id);
         fetchAccounts();
       }
     } catch {}
