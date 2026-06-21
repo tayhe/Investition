@@ -4,13 +4,16 @@
 
 ## 功能特性
 
-- **投资仪表盘** — 总资产曲线、持仓概览、今日/本月盈亏、最大回撤
+- **投资仪表盘** — 总资产曲线、持仓概览、盈亏统计、最大回撤
 - **持仓管理** — 按市场分组（US/HK/A股），成本价、现价、盈亏一目了然
-- **交易记录** — 买入/卖出时间线，支持按标的、时间、市场筛选
-- **复盘分析** — 回撤图、月度收益、持仓集中度、与基准对比
-- **IBKR 自动同步** — 对接 Interactive Brokers Flex Web Service，定时拉取持仓和交易数据
-- **多币种支持** — USD/HKD/CNY 自动汇率换算
-- **手动录入** — 非 IBKR 账户支持手动添加交易或 CSV 导入
+- **交易记录** — 买入/卖出时间线，按标的、时间、市场筛选
+- **复盘分析** — 回撤图、月度收益明细、市场分布
+- **账户管理** — 多账户支持，每个账户独立的券商集成和数据导入
+- **IBKR 自动同步** — 对接 Interactive Brokers Flex Web Service，含缓存和限流防护
+- **CSV 导入** — 支持 Schwab、IBKR、通用格式
+- **价格数据** — Yahoo Finance 自动获取，定时任务
+- **多币种支持** — USD/HKD/CNY/EUR/GBP/JPY/SEK 汇率换算
+- **暗色模式** — 一键切换，偏好本地保存
 
 ## 技术栈
 
@@ -21,6 +24,8 @@
 | 数据库 | PostgreSQL + Prisma ORM |
 | 认证 | NextAuth.js v5 |
 | 图表 | Recharts |
+| 定时任务 | node-cron |
+| 价格数据 | yahoo-finance2 |
 | 部署 | Docker Compose |
 
 ## 快速开始
@@ -50,53 +55,77 @@ cp .env.example .env
 # 运行数据库迁移
 npx prisma migrate dev
 
+# 种子数据（创建 demo 用户和示例数据）
+npx prisma db seed
+
 # 启动开发服务器
 npm run dev
 ```
 
 访问 http://localhost:3000
 
+**默认账户**: `demo@investition.app` / `demo1234`
+
 ### Docker 部署
 
 ```bash
-# 配置环境变量
 cp .env.example .env
 # 编辑 .env，设置 AUTH_SECRET 等生产环境变量
 
-# 一键启动
 docker compose up -d --build
+docker compose exec app npx prisma migrate deploy
+docker compose exec app npx prisma db seed  # 可选
 ```
 
 ## IBKR 数据同步
 
-1. 登录 [Interactive Brokers](https://www.interactivebrokers.com)，进入 **报告 → Flex Queries**
-2. 创建自定义报告查询，勾选需要的字段（交易、持仓）
-3. 获取 **Flex Token** 和 **Query ID**
-4. 在网站设置页面填入 Token 和 Query ID
-5. 点击同步或等待每日自动同步
+### 方式一：API 自动同步
+
+1. 登录 IBKR 客户门户 → **报告 → Flex 查询**
+2. 创建 Activity Flex Query，勾选交易和持仓字段
+3. 获取 **Flex Token**（报告 → Flex 查询 → Flex Web Service 配置）
+4. 获取 **Query ID**（点击查询旁的 ℹ️ 图标）
+5. 在网站「账户管理」页面展开 IBKR 账户 → API 自动同步 → 输入 Token 和 Query ID
+
+### 方式二：手动导入文件
+
+- **CSV 导入**: 从 Schwab/IBKR 导出 CSV 文件上传
+- **XML 导入**: 从 IBKR 下载 Flex Query XML 文件上传
+
+### IBKR Flex Query 配置
+
+需要勾选的区段：
+- **交易**（Trades）— 所有字段
+- **未平仓仓位**（Open Positions）— 所有字段
+- **复杂持仓**（Complex Positions）— 期权持仓
 
 ## 项目结构
 
 ```
 src/
 ├── app/
-│   ├── page.tsx                # 仪表盘
-│   ├── portfolio/              # 持仓管理
-│   ├── transactions/           # 交易记录
-│   ├── analytics/              # 复盘分析
-│   ├── settings/               # 设置（IBKR 配置）
-│   ├── login/                  # 登录
-│   └── api/                    # REST API
-├── components/                 # UI 组件
-└── lib/
-    ├── db.ts                   # Prisma 客户端
-    ├── auth.ts                 # NextAuth 配置
-    ├── utils.ts                # 工具函数
-    └── ibkr/
-        ├── flex.ts             # IBKR Flex API 集成
-        └── sync.ts             # 数据同步逻辑
+│   ├── (app)/                    # 认证保护的页面
+│   │   ├── page.tsx              # 仪表盘
+│   │   ├── portfolio/            # 持仓管理
+│   │   ├── transactions/         # 交易记录
+│   │   ├── analytics/            # 复盘分析
+│   │   ├── accounts/             # 账户管理
+│   │   └── settings/             # 设置
+│   ├── login/                    # 登录
+│   └── api/                      # REST API
+├── components/                   # UI 组件
+├── lib/
+│   ├── db.ts                     # Prisma 客户端
+│   ├── auth.ts                   # NextAuth（Edge-safe）
+│   ├── auth-providers.ts         # NextAuth（完整）
+│   ├── scheduler.ts              # 定时任务
+│   ├── prices/                   # 价格和汇率
+│   ├── csv/                      # CSV 解析
+│   └── ibkr/                     # IBKR 集成
+└── instrumentation.ts            # 启动调度器
 prisma/
-└── schema.prisma               # 数据库模型定义
+├── schema.prisma                 # 数据库模型
+└── seed.ts                       # 种子数据
 ```
 
 ## License

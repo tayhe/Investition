@@ -14,6 +14,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 npm install
 cp .env.example .env          # 编辑 DATABASE_URL
 npx prisma migrate dev --name init  # 首次迁移
+npx prisma db seed             # 种子数据（可选）
 npm run dev                    # http://localhost:3000
 ```
 
@@ -23,6 +24,9 @@ npm run dev                    # http://localhost:3000
 - **Prisma 7** + PostgreSQL — 使用 `@prisma/adapter-pg` 驱动适配器
 - **NextAuth v5** (beta) — Credentials Provider, JWT session
 - **Recharts** — 图表
+- **yahoo-finance2** — 价格数据
+- **node-cron** — 定时任务
+- **csv-parse** — CSV 解析
 - **Docker Compose** — 部署
 
 ## 关键约束
@@ -46,54 +50,90 @@ const db = new PrismaClient({ adapter });
 
 - 输出模式: `standalone`（见 `next.config.ts`）
 - 先读 `node_modules/next/dist/docs/` 再写代码
-- 不要假设 API 与旧版相同
+- middleware 已弃用，改用 Server Component 中 `auth()` 检查
+- instrumentation 自动启动（无需 experimental 配置）
+
+### Auth 拆分
+
+Prisma 客户端不兼容 Edge Runtime，因此 auth 分为两个文件：
+- `src/lib/auth.ts` — 仅 JWT 验证，不导入 Prisma（用于 middleware/Server Component）
+- `src/lib/auth-providers.ts` — 完整配置，含 Credentials Provider + Prisma（用于 API Route）
+
+### IBKR 限流
+
+- `/SendRequest` 限制：每秒 1 次，每分钟 10 次
+- 错误 1001：服务器繁忙，需等待
+- 错误 1025：IP 级别封锁（多次失败），需等待 24 小时或生成新 Token
+- 系统内置 15 分钟冷却期 + FlexCache 缓存自动降级
+
+### Yahoo Finance 符号映射
+
+- 外汇对：`USD.CNH` → `USDCNH=X`
+- 瑞典股票：`SIVE` (SFB) → `SIVE.ST`
+- 其他交易所后缀：`.L` (伦敦)、`.DE` (法兰克福)、`.T` (东京) 等
 
 ### 项目结构
 
 ```
 src/
-├── app/                    # 页面和 API Routes
-│   ├── page.tsx            # 仪表盘（当前用 mock 数据，需接入 DB）
-│   ├── portfolio/          # 持仓管理
-│   ├── transactions/       # 交易记录
-│   ├── analytics/          # 复盘分析
-│   ├── settings/           # IBKR 配置
-│   ├── login/              # 登录
-│   └── api/                # REST API endpoints
-├── components/             # UI 组件
-└── lib/
-    ├── db.ts               # Prisma 客户端单例
-    ├── auth.ts             # NextAuth 配置
-    ├── utils.ts            # 格式化工具
-    └── ibkr/
-        ├── flex.ts         # IBKR Flex XML 解析
-        └── sync.ts         # 同步 + 快照逻辑
+├── app/
+│   ├── (app)/                    # 认证保护的页面（有侧边栏）
+│   │   ├── layout.tsx            # 侧边栏 + SessionProvider + auth 检查
+│   │   ├── page.tsx              # 仪表盘
+│   │   ├── portfolio/            # 持仓管理
+│   │   ├── transactions/         # 交易记录
+│   │   ├── analytics/            # 复盘分析
+│   │   ├── accounts/             # 账户管理
+│   │   └── settings/             # 设置
+│   ├── login/                    # 登录（独立布局，无侧边栏）
+│   ├── auth-provider.tsx         # SessionProvider 封装
+│   ├── layout.tsx                # 根布局（最小化）
+│   └── api/                      # REST API
+├── components/                   # UI 组件
+├── lib/
+│   ├── db.ts                     # Prisma 客户端单例
+│   ├── auth.ts                   # NextAuth（Edge-safe）
+│   ├── auth-providers.ts         # NextAuth（完整）
+│   ├── scheduler.ts              # 定时任务调度器
+│   ├── prices/                   # 价格和汇率
+│   ├── csv/                      # CSV 解析
+│   └── ibkr/                     # IBKR 集成
+├── generated/prisma/             # Prisma 自动生成（不要修改）
+└── instrumentation.ts            # 启动调度器
 prisma/
-└── schema.prisma           # 数据库模型（9 张表）
+├── schema.prisma                 # 数据库模型（10 张表）
+├── seed.ts                       # 种子数据脚本
+└── migrations/                   # 数据库迁移
 ```
 
 ## 开发工作流
 
 1. **改代码前** — 先读相关文件，理解现有模式
 2. **改 Prisma schema 后** — `npx prisma migrate dev --name <描述>` + `npx prisma generate`
-3. **提交前** — `npm run build` 确保无类型错误
+3. **提交前** — `npm run build` 确保无类型错误 + `npm run lint`
 4. **API 路由** — 统一返回 `{ data }` 或 `{ error }` 格式
-5. **页面数据** — 推荐 Server Component 直接调用 `db` 查询，避免不必要的 client fetch
+5. **页面数据** — Server Component 直接调用 `db` 查询，用 `auth()` 获取当前用户
 
 ## 当前状态
 
-- ✅ 项目骨架完成，`npm run build` 通过
-- ✅ 数据库 schema 设计完成（未迁移）
-- ⚠️ 所有页面使用 mock 数据，未接入数据库
-- ❌ 无注册流程、无价格数据源、无定时任务
+- ✅ 数据库迁移完成，所有页面接入真实数据
+- ✅ 登录/登出 + 路由保护
+- ✅ IBKR Flex 同步（API + XML 导入 + 缓存降级）
+- ✅ Yahoo Finance 价格获取（含符号映射）
+- ✅ 定时任务（价格/汇率/快照）
+- ✅ CSV 导入（Schwab/IBKR/通用）
+- ✅ 暗色模式 + 账户管理
+- ❌ 无注册页面
+- ❌ 无 Schwab API 集成
 
-**详细待办**: 见 `PLAN.md` 第五章，按 P0/P1/P2 优先级排列。
+**详细待办**: 见 `PLAN.md` 第五章。
 
 ## 部署
 
 ```bash
 docker compose up -d --build
 docker compose exec app npx prisma migrate deploy
+docker compose exec app npx prisma db seed  # 可选
 ```
 
 ## 禁止事项
