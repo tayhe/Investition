@@ -55,6 +55,35 @@ export async function POST(request: NextRequest) {
   });
 }
 
+export async function PATCH(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const body = await request.json();
+  const { id, name } = body;
+
+  if (!id || !name?.trim()) {
+    return NextResponse.json({ error: "id 和 name 不能为空" }, { status: 400 });
+  }
+
+  const account = await db.account.findFirst({
+    where: { id, userId: session.user.id },
+  });
+
+  if (!account) {
+    return NextResponse.json({ error: "账户不存在" }, { status: 404 });
+  }
+
+  const updated = await db.account.update({
+    where: { id },
+    data: { name: name.trim() },
+  });
+
+  return NextResponse.json({ id: updated.id, name: updated.name });
+}
+
 export async function DELETE(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {

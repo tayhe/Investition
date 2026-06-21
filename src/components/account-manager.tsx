@@ -29,6 +29,8 @@ export function AccountManager() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [initialized, setInitialized] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
 
   const fetchAccounts = useCallback(async () => {
     try {
@@ -88,6 +90,27 @@ export function AccountManager() {
     } catch {}
   };
 
+  const startRename = (id: string, currentName: string) => {
+    setEditingId(id);
+    setEditName(currentName);
+  };
+
+  const handleRename = async (id: string) => {
+    if (!editName.trim()) return;
+    try {
+      const res = await fetch("/api/accounts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, name: editName.trim() }),
+      });
+      if (res.ok) {
+        setEditingId(null);
+        setExpandedId(id);
+        fetchAccounts();
+      }
+    } catch {}
+  };
+
   const brokerLabels: Record<string, string> = { MANUAL: "手动录入", IBKR: "Interactive Brokers" };
   const currencyOptions = ["USD", "HKD", "CNY", "EUR", "GBP", "JPY", "SEK"];
 
@@ -107,14 +130,44 @@ export function AccountManager() {
                 onClick={() => setExpandedId(expandedId === account.id ? null : account.id)}
                 className="w-full flex items-center justify-between p-4 hover:bg-accent/50 transition-colors text-left"
               >
-                <div>
-                  <div className="font-medium text-sm">{account.name}</div>
-                  <div className="text-xs text-muted">
-                    {brokerLabels[account.broker] || account.broker} · {account.currency}
-                    {account.hasIbkrConfig && <span className="text-green ml-2">IBKR 已配置</span>}
-                  </div>
+                <div className="flex items-center gap-2 min-w-0">
+                  {editingId === account.id ? (
+                    <form
+                      onSubmit={(e) => { e.preventDefault(); e.stopPropagation(); handleRename(account.id); }}
+                      className="flex items-center gap-2"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        className="bg-background border border-default rounded px-2 py-0.5 text-sm font-medium w-40"
+                        autoFocus
+                        onKeyDown={(e) => { if (e.key === "Escape") setEditingId(null); }}
+                      />
+                      <button type="submit" className="text-xs text-green hover:underline">保存</button>
+                      <button type="button" onClick={() => setEditingId(null)} className="text-xs text-muted hover:underline">取消</button>
+                    </form>
+                  ) : (
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm truncate">{account.name}</span>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); startRename(account.id, account.name); }}
+                          className="text-xs text-muted hover:text-foreground shrink-0"
+                          title="重命名"
+                        >
+                          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                        </button>
+                      </div>
+                      <div className="text-xs text-muted">
+                        {brokerLabels[account.broker] || account.broker} · {account.currency}
+                        {account.hasIbkrConfig && <span className="text-green ml-2">IBKR 已配置</span>}
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 shrink-0">
                   <span className="text-xs text-muted">{new Date(account.createdAt).toLocaleDateString("zh-CN")}</span>
                   <button onClick={(e) => { e.stopPropagation(); handleDelete(account.id, account.name); }} className="text-xs text-red hover:underline">删除</button>
                   <svg className={`h-4 w-4 text-muted transition-transform ${expandedId === account.id ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
