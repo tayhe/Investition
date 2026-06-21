@@ -2,6 +2,7 @@ import { PriceFetcher } from "@/components/price-fetcher";
 import { IbkrConfig } from "@/components/ibkr-config";
 import { IbkrSync } from "@/components/ibkr-sync";
 import { XmlImporter } from "@/components/xml-importer";
+import { CsvImporter } from "@/components/csv-importer";
 import { CronStatus } from "@/components/cron-status";
 
 export default function SettingsPage() {
@@ -36,6 +37,14 @@ export default function SettingsPage() {
       <div className="bg-card border border-default rounded-xl p-6">
         <h2 className="text-lg font-semibold mb-4">定时任务</h2>
         <CronStatus />
+      </div>
+
+      <div className="bg-card border border-default rounded-xl p-6">
+        <h2 className="text-lg font-semibold mb-4">CSV 导入</h2>
+        <p className="text-sm text-muted mb-4">
+          从券商导出 CSV 文件，批量导入交易记录和持仓数据。支持 Schwab、IBKR 和通用格式。
+        </p>
+        <CsvImporter />
       </div>
 
       <div className="bg-card border border-default rounded-xl p-6">
