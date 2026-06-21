@@ -193,3 +193,16 @@ model ExchangeRate {
   @@unique([baseCurrency, quoteCurrency, date])
   @@index([date])
 }
+
+// ─── IBKR Flex Report Cache ────────────────────────────────────
+
+model FlexCache {
+  id          String   @id @default(cuid())
+  accountId   String
+  xml         String   @db.Text
+  tradesCount Int      @default(0)
+  positionsCount Int   @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([accountId, createdAt])
+}

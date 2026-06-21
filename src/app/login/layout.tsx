@@ -1,10 +1,4 @@
-import type { Metadata } from "next";
-import "./globals.css";
-
-export const metadata: Metadata = {
-  title: "Investition - 投资记录",
-  description: "记录投资组合、追踪资产增值与回撤",
-};
+import AuthProvider from "../auth-provider";
 
 const themeScript = `
 (function() {
@@ -17,17 +11,19 @@ const themeScript = `
 })();
 `;
 
-export default function RootLayout({
+export default function LoginLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body>{children}</body>
+      <body>
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }

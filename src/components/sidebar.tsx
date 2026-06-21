@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { signOut } from "next-auth/react";
 import {
   LayoutDashboard,
   Briefcase,
@@ -9,8 +10,10 @@ import {
   BarChart3,
   Settings,
   TrendingUp,
+  LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ThemeToggle } from "./theme-toggle";
 
 const navItems = [
   { href: "/", label: "仪表盘", icon: LayoutDashboard },
@@ -53,7 +56,15 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="p-4 border-t border-default">
+      <div className="p-4 border-t border-default space-y-2">
+        <ThemeToggle />
+        <button
+          onClick={() => signOut({ callbackUrl: "/login" })}
+          className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-muted hover:text-foreground hover:bg-accent/50 w-full transition-colors"
+        >
+          <LogOut className="h-4 w-4" />
+          退出登录
+        </button>
         <div className="text-xs text-muted">
           Investition v0.1.0
         </div>
