@@ -11,6 +11,7 @@ import {
   Settings,
   TrendingUp,
   LogOut,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./theme-toggle";
@@ -20,6 +21,7 @@ const navItems = [
   { href: "/portfolio", label: "持仓管理", icon: Briefcase },
   { href: "/transactions", label: "交易记录", icon: ArrowLeftRight },
   { href: "/analytics", label: "复盘分析", icon: BarChart3 },
+  { href: "/accounts", label: "账户管理", icon: Users },
   { href: "/settings", label: "设置", icon: Settings },
 ];
 
