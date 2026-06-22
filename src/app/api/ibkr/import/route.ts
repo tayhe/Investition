@@ -34,10 +34,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "未找到 IBKR 账户，请先配置" }, { status: 400 });
     }
 
-    const currentYear = new Date().getFullYear();
     await db.flexCache.upsert({
       where: {
-        accountId_year: { accountId: account.id, year: currentYear },
+        accountId_year: { accountId: account.id, year: report.year },
       },
       update: {
         xml,
@@ -47,7 +46,7 @@ export async function POST(request: NextRequest) {
       },
       create: {
         accountId: account.id,
-        year: currentYear,
+        year: report.year,
         xml,
         tradesCount: report.trades.length,
         positionsCount: report.positions.length,

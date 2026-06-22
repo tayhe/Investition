@@ -41,6 +41,7 @@ export interface FlexPosition {
 export interface FlexReport {
   trades: FlexTrade[];
   positions: FlexPosition[];
+  year: number;
 }
 
 export async function fetchFlexReferenceCode(config: IbkrFlexConfig): Promise<string> {
@@ -122,6 +123,12 @@ export function parseFlexXml(xml: string): FlexReport {
 
   const lastStatementIdx = xml.lastIndexOf("<FlexStatement");
   const lastXml = lastStatementIdx >= 0 ? xml.slice(lastStatementIdx) : xml;
+
+  let year = new Date().getFullYear();
+  const statementMatch = lastXml.match(/<FlexStatement[^>]*fromDate="(\d{4})/);
+  if (statementMatch) {
+    year = parseInt(statementMatch[1]);
+  }
 
   const tradeRegex = /<Trade\s+([^>]*)\/>/g;
   let match;
@@ -225,7 +232,7 @@ export function parseFlexXml(xml: string): FlexReport {
 
   const positions = Array.from(posMap.values());
 
-  return { trades, positions };
+  return { trades, positions, year };
 }
 
 function parseXmlAttributes(attrString: string): Record<string, string> {

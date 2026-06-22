@@ -66,10 +66,9 @@ export async function syncAccountData(accountId: string, force = false): Promise
     report = result.report;
     rawXml = result.rawXml;
 
-    const currentYear = new Date().getFullYear();
     await db.flexCache.upsert({
       where: {
-        accountId_year: { accountId, year: currentYear },
+        accountId_year: { accountId, year: report.year },
       },
       update: {
         xml: rawXml,
@@ -79,7 +78,7 @@ export async function syncAccountData(accountId: string, force = false): Promise
       },
       create: {
         accountId,
-        year: currentYear,
+        year: report.year,
         xml: rawXml,
         tradesCount: report.trades.length,
         positionsCount: report.positions.length,
@@ -123,12 +122,12 @@ export async function syncAccountData(accountId: string, force = false): Promise
 }
 
 export async function syncFromCache(accountId: string): Promise<{ trades: number; positions: number }> {
-  const currentYear = new Date().getFullYear();
   const cached = await db.flexCache.findFirst({
-    where: { accountId, year: currentYear },
+    where: { accountId },
+    orderBy: { createdAt: "desc" },
   });
 
-  if (!cached) throw new Error("无当年缓存数据，请先执行一次 IBKR 同步");
+  if (!cached) throw new Error("无缓存数据，请先执行一次 IBKR 同步");
 
   const report = parseFlexXml(cached.xml);
 
