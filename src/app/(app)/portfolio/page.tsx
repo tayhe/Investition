@@ -78,7 +78,7 @@ async function getPortfolioData() {
     };
   });
 
-  enriched.sort((a, b) => Math.abs(b.usdMarketValue) - Math.abs(a.usdMarketValue));
+  enriched.sort((a, b) => b.usdMarketValue - a.usdMarketValue);
 
   const marketMap = new Map<string, { value: number; pnl: number; currency: string }>();
   for (const pos of enriched) {
