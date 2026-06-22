@@ -28,14 +28,12 @@ async function getPortfolioData() {
   const enriched = positions.map((pos) => {
     const currentPrice = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
     const qty = Number(pos.quantity);
-    const absQty = Math.abs(qty);
     const avgCost = Number(pos.avgCost);
     const multiplier = pos.security.type === "OPTION" ? 100 : 1;
-    const costBasis = absQty * multiplier * avgCost;
-    const marketValue = absQty * multiplier * currentPrice;
-    const isShort = qty < 0;
-    const pnl = isShort ? (costBasis - marketValue) : (marketValue - costBasis);
-    const pnlPercent = costBasis > 0 ? (pnl / costBasis) * 100 : 0;
+    const costBasis = qty * multiplier * avgCost;
+    const marketValue = qty * multiplier * currentPrice;
+    const pnl = marketValue - costBasis;
+    const pnlPercent = costBasis !== 0 ? (pnl / Math.abs(costBasis)) * 100 : 0;
 
     return {
       symbol: pos.security.symbol,
@@ -54,7 +52,7 @@ async function getPortfolioData() {
   const marketMap = new Map<string, { value: number; pnl: number; currency: string }>();
   for (const pos of enriched) {
     const existing = marketMap.get(pos.market) || { value: 0, pnl: 0, currency: pos.currency };
-    existing.value += pos.quantity > 0 ? pos.marketValue : -pos.marketValue;
+    existing.value += pos.marketValue;
     existing.pnl += pos.pnl;
     marketMap.set(pos.market, existing);
   }

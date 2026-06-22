@@ -30,14 +30,12 @@ async function getDashboardData() {
   const enrichedPositions = positions.map((pos) => {
     const currentPrice = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
     const qty = Number(pos.quantity);
-    const absQty = Math.abs(qty);
     const avgCost = Number(pos.avgCost);
     const multiplier = pos.security.type === "OPTION" ? 100 : 1;
-    const costBasis = absQty * multiplier * avgCost;
-    const marketValue = absQty * multiplier * currentPrice;
-    const isShort = qty < 0;
-    const pnl = isShort ? (costBasis - marketValue) : (marketValue - costBasis);
-    const pnlPercent = costBasis > 0 ? (pnl / costBasis) * 100 : 0;
+    const costBasis = qty * multiplier * avgCost;
+    const marketValue = qty * multiplier * currentPrice;
+    const pnl = marketValue - costBasis;
+    const pnlPercent = costBasis !== 0 ? (pnl / Math.abs(costBasis)) * 100 : 0;
 
     return {
       symbol: pos.security.symbol,
@@ -58,9 +56,7 @@ async function getDashboardData() {
     orderBy: { date: "asc" },
   });
 
-  const totalValue = enrichedPositions.reduce((sum, p) => {
-    return sum + (p.quantity > 0 ? p.marketValue : -p.marketValue);
-  }, 0);
+  const totalValue = enrichedPositions.reduce((sum, p) => sum + p.marketValue, 0);
   const totalPnl = enrichedPositions.reduce((sum, p) => sum + p.pnl, 0);
 
   const maxDrawdown = snapshots.reduce(
