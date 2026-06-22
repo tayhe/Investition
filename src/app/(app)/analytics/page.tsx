@@ -5,13 +5,12 @@ import { AnalyticsCharts } from "./analytics-charts";
 
 async function getAnalyticsData() {
   const session = await auth();
-  if (!session?.user?.id) return { snapshots: [], positions: [], monthlyData: [] };
+  if (!session?.user?.id) return { snapshots: [], monthlyData: [], positionRanking: [] };
 
   const accounts = await db.account.findMany({
     where: { userId: session.user.id },
   });
-
-  if (accounts.length === 0) return { snapshots: [], positions: [], monthlyData: [] };
+  if (accounts.length === 0) return { snapshots: [], monthlyData: [], positionRanking: [] };
 
   const accountIds = accounts.map((a) => a.id);
 
@@ -29,14 +28,7 @@ async function getAnalyticsData() {
   const securityIds = [...new Set(positions.map((p) => p.securityId))];
   const priceMap = await getLatestPrices(securityIds);
 
-  const enrichedPositions = positions.map((pos) => {
-    const currentPrice = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
-    return {
-      market: pos.security.market,
-      marketValue: Number(pos.quantity) * currentPrice,
-    };
-  });
-
+  // Monthly data
   const monthlyMap = new Map<string, { startValue: number; endValue: number; pnl: number }>();
   for (const s of snapshots) {
     const month = s.date.toISOString().slice(0, 7);
@@ -46,7 +38,6 @@ async function getAnalyticsData() {
     existing.pnl += s.dailyPnl ? Number(s.dailyPnl) : 0;
     monthlyMap.set(month, existing);
   }
-
   const monthlyData = Array.from(monthlyMap.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([month, data]) => ({
@@ -59,20 +50,45 @@ async function getAnalyticsData() {
       returnRate: data.startValue > 0 ? ((data.endValue - data.startValue) / data.startValue) * 100 : 0,
     }));
 
+  // Position P&L ranking
+  const positionPnl = positions.map((pos) => {
+    const price = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
+    const mult = pos.security.type === "OPTION" ? 100 : 1;
+    const qty = Number(pos.quantity);
+    const costBasis = qty * mult * Number(pos.avgCost);
+    const marketValue = qty * mult * price;
+    const pnl = marketValue - costBasis;
+    return {
+      symbol: pos.security.symbol,
+      name: pos.security.name,
+      pnl,
+      costBasis: Math.abs(costBasis),
+    };
+  });
+
+  const totalPnl = positionPnl.reduce((sum, p) => sum + p.pnl, 0);
+  const positionRanking = positionPnl
+    .sort((a, b) => b.pnl - a.pnl)
+    .map((p) => ({
+      symbol: p.symbol,
+      name: p.name,
+      pnl: p.pnl,
+      contribution: totalPnl !== 0 ? (p.pnl / Math.abs(totalPnl)) * 100 : 0,
+    }));
+
   return {
     snapshots: snapshots.map((s) => ({
       date: s.date.toISOString().split("T")[0],
       value: Number(s.totalValue),
-      dailyReturn: s.dailyReturn ? Number(s.dailyReturn) : null,
       maxDrawdown: s.maxDrawdown ? Number(s.maxDrawdown) : null,
     })),
-    positions: enrichedPositions,
     monthlyData,
+    positionRanking,
   };
 }
 
 export default async function AnalyticsPage() {
-  const { snapshots, positions, monthlyData } = await getAnalyticsData();
+  const { snapshots, monthlyData, positionRanking } = await getAnalyticsData();
 
   return (
     <div className="space-y-8">
@@ -82,8 +98,8 @@ export default async function AnalyticsPage() {
       </div>
       <AnalyticsCharts
         snapshots={snapshots}
-        positions={positions}
         monthlyData={monthlyData}
+        positionRanking={positionRanking}
       />
     </div>
   );

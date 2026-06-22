@@ -1,6 +1,5 @@
 import { StatCard } from "@/components/stat-card";
 import { EquityCurve } from "@/components/equity-curve";
-import { PositionsTable } from "@/components/positions-table";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { formatCurrency } from "@/lib/utils";
@@ -8,56 +7,43 @@ import { getLatestPrices } from "@/lib/prices/cache";
 
 async function getDashboardData() {
   const session = await auth();
-  if (!session?.user?.id) return { positions: [], snapshots: [], stats: null };
+  if (!session?.user?.id) return { snapshots: [], stats: null };
 
   const accounts = await db.account.findMany({
     where: { userId: session.user.id },
   });
-
-  if (accounts.length === 0) return { positions: [], snapshots: [], stats: null };
+  if (accounts.length === 0) return { snapshots: [], stats: null };
 
   const accountIds = accounts.map((a) => a.id);
 
-  const positions = await db.position.findMany({
-    where: { accountId: { in: accountIds }, quantity: { not: 0 } },
-    include: { security: true },
-    orderBy: { updatedAt: "desc" },
-  });
+  const [positions, snapshots] = await Promise.all([
+    db.position.findMany({
+      where: { accountId: { in: accountIds }, quantity: { not: 0 } },
+      include: { security: true },
+    }),
+    db.snapshot.findMany({
+      where: { accountId: { in: accountIds } },
+      orderBy: { date: "asc" },
+    }),
+  ]);
 
   const securityIds = [...new Set(positions.map((p) => p.securityId))];
   const priceMap = await getLatestPrices(securityIds);
 
-  const enrichedPositions = positions.map((pos) => {
-    const currentPrice = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
+  const totalValue = positions.reduce((sum, pos) => {
+    const price = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
+    const mult = pos.security.type === "OPTION" ? 100 : 1;
+    return sum + Number(pos.quantity) * mult * price;
+  }, 0);
+
+  const totalPnl = positions.reduce((sum, pos) => {
+    const price = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
+    const mult = pos.security.type === "OPTION" ? 100 : 1;
     const qty = Number(pos.quantity);
-    const avgCost = Number(pos.avgCost);
-    const multiplier = pos.security.type === "OPTION" ? 100 : 1;
-    const costBasis = qty * multiplier * avgCost;
-    const marketValue = qty * multiplier * currentPrice;
-    const pnl = marketValue - costBasis;
-    const pnlPercent = costBasis !== 0 ? (pnl / Math.abs(costBasis)) * 100 : 0;
-
-    return {
-      symbol: pos.security.symbol,
-      name: pos.security.name,
-      market: pos.security.market,
-      quantity: qty,
-      avgCost,
-      currentPrice,
-      marketValue,
-      pnl,
-      pnlPercent,
-      currency: pos.currency,
-    };
-  });
-
-  const snapshots = await db.snapshot.findMany({
-    where: { accountId: { in: accountIds } },
-    orderBy: { date: "asc" },
-  });
-
-  const totalValue = enrichedPositions.reduce((sum, p) => sum + p.marketValue, 0);
-  const totalPnl = enrichedPositions.reduce((sum, p) => sum + p.pnl, 0);
+    const cost = qty * mult * Number(pos.avgCost);
+    const mv = qty * mult * price;
+    return sum + (mv - cost);
+  }, 0);
 
   const maxDrawdown = snapshots.reduce(
     (min, s) => (s.maxDrawdown && Number(s.maxDrawdown) < min ? Number(s.maxDrawdown) : min),
@@ -65,7 +51,6 @@ async function getDashboardData() {
   );
 
   return {
-    positions: enrichedPositions,
     snapshots: snapshots.map((s) => ({
       date: s.date.toISOString().split("T")[0],
       value: Number(s.totalValue),
@@ -73,6 +58,7 @@ async function getDashboardData() {
     stats: {
       totalValue,
       totalPnl,
+      positionCount: positions.length,
       maxDrawdown,
       currency: accounts[0].currency,
     },
@@ -80,7 +66,7 @@ async function getDashboardData() {
 }
 
 export default async function Dashboard() {
-  const { positions, snapshots, stats } = await getDashboardData();
+  const { snapshots, stats } = await getDashboardData();
 
   if (!stats) {
     return (
@@ -90,7 +76,7 @@ export default async function Dashboard() {
           <p className="text-muted mt-1">总览你的投资组合表现</p>
         </div>
         <div className="text-center py-20 text-muted border border-default rounded-xl">
-          暂无数据。请先在设置页面配置券商账户或手动录入持仓。
+          暂无数据。请先在账户管理页面配置券商账户。
         </div>
       </div>
     );
@@ -117,7 +103,7 @@ export default async function Dashboard() {
         />
         <StatCard
           title="持仓数"
-          value={String(positions.length)}
+          value={String(stats.positionCount)}
           subtitle="只标的"
         />
         <StatCard
@@ -130,11 +116,6 @@ export default async function Dashboard() {
       <div className="bg-card border border-default rounded-xl p-6">
         <h2 className="text-lg font-semibold mb-4">资产曲线</h2>
         <EquityCurve data={snapshots} currency={stats.currency} />
-      </div>
-
-      <div>
-        <h2 className="text-lg font-semibold mb-4">当前持仓</h2>
-        <PositionsTable positions={positions} />
       </div>
     </div>
   );
