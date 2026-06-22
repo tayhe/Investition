@@ -119,9 +119,12 @@ export async function syncIbkrFlex(config: IbkrFlexConfig): Promise<FlexSyncResu
 export function parseFlexXml(xml: string): FlexReport {
   const trades: FlexTrade[] = [];
 
+  const lastStatementIdx = xml.lastIndexOf("<FlexStatement");
+  const xmlToParse = lastStatementIdx >= 0 ? xml.slice(lastStatementIdx) : xml;
+
   const tradeRegex = /<Trade\s+([^>]*)\/>/g;
   let match;
-  while ((match = tradeRegex.exec(xml)) !== null) {
+  while ((match = tradeRegex.exec(xmlToParse)) !== null) {
     const attrs = parseXmlAttributes(match[1]);
     const dateTime = attrs.dateTime || "";
     const dateParts = dateTime.split(";");
@@ -152,7 +155,7 @@ export function parseFlexXml(xml: string): FlexReport {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  while ((match = posRegex.exec(xml)) !== null) {
+  while ((match = posRegex.exec(xmlToParse)) !== null) {
     const attrStr = match[1] || match[2];
     const attrs = parseXmlAttributes(attrStr);
     const quantity = parseFloat(attrs.position || attrs.quantity || "0");
