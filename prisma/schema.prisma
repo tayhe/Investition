@@ -66,6 +66,7 @@ model Security {
   type        SecurityType @default(STOCK)
   currency    String       // trading currency
   isin        String?      // international identifier
+  multiplier  Decimal      @default(1) @db.Decimal(10, 2) // option multiplier, 100 for US options
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 

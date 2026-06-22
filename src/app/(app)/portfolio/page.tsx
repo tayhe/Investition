@@ -29,8 +29,9 @@ async function getPortfolioData() {
     const currentPrice = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
     const qty = Number(pos.quantity);
     const absQty = Math.abs(qty);
+    const multiplier = Number(pos.security.multiplier) || 1;
     const costBasis = Number(pos.costBasis);
-    const marketValue = absQty * currentPrice;
+    const marketValue = absQty * multiplier * currentPrice;
     const isShort = qty < 0;
     const pnl = isShort ? (costBasis - marketValue) : (marketValue - costBasis);
     const pnlPercent = costBasis > 0 ? (pnl / costBasis) * 100 : 0;

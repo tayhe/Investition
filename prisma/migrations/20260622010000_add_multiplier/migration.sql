@@ -1,0 +1,1 @@
+ALTER TABLE "Security" ADD COLUMN "multiplier" DECIMAL(10,2) NOT NULL DEFAULT 1;

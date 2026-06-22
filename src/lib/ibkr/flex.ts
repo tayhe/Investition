@@ -33,6 +33,7 @@ export interface FlexPosition {
   averageCost: number;
   marketPrice: number;
   marketValue: number;
+  multiplier: number;
   currency: string;
   unrealizedPnl: number;
   contractType: string;
@@ -196,6 +197,7 @@ export function parseFlexXml(xml: string): FlexReport {
     const marketValue = parseFloat(
       attrs.positionValue || attrs.value || attrs.marketValue || "0"
     );
+    const multiplier = parseFloat(attrs.multiplier || "1");
     let averageCost = parseFloat(
       attrs.costBasisPrice || attrs.averageCost || "0"
     );
@@ -230,6 +232,7 @@ export function parseFlexXml(xml: string): FlexReport {
         averageCost,
         marketPrice,
         marketValue,
+        multiplier,
         currency: attrs.currency || "USD",
         unrealizedPnl,
         contractType: attrs.assetCategory || attrs.assetClass || attrs.contractType || "STK",

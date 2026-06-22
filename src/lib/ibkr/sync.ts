@@ -138,15 +138,24 @@ export async function syncFromCache(accountId: string): Promise<{ trades: number
   return { trades: tradesCount, positions: report.positions.length };
 }
 
-async function getOrCreateSecurity(ibkrSymbol: string, exchange: string, description: string, currency: string, assetClass?: string) {
+async function getOrCreateSecurity(ibkrSymbol: string, exchange: string, description: string, currency: string, assetClass?: string, multiplier?: number) {
   const market = mapIbkrExchangeToMarket(exchange);
   const type = mapIbkrAssetClass(assetClass || "STK");
+  const mult = multiplier ?? (type === "OPTION" ? 100 : 1);
 
   const existing = await db.security.findUnique({
     where: { symbol_exchange: { symbol: ibkrSymbol, exchange } },
   });
 
-  if (existing) return existing;
+  if (existing) {
+    if (Number(existing.multiplier) !== mult) {
+      await db.security.update({
+        where: { id: existing.id },
+        data: { multiplier: mult },
+      });
+    }
+    return existing;
+  }
 
   return db.security.create({
     data: {
@@ -156,6 +165,7 @@ async function getOrCreateSecurity(ibkrSymbol: string, exchange: string, descrip
       market,
       currency,
       type,
+      multiplier: mult,
     },
   });
 }
@@ -241,7 +251,8 @@ export async function upsertPositions(accountId: string, report: FlexReport) {
       pos.exchange,
       pos.description,
       pos.currency,
-      pos.contractType
+      pos.contractType,
+      pos.multiplier
     );
 
     activeSecurityIds.add(security.id);
@@ -303,11 +314,9 @@ export async function createDailySnapshot(accountId: string, date: Date) {
       orderBy: { date: "desc" },
     });
 
-    if (latestPrice) {
-      positionsValue = positionsValue.add(pos.quantity.mul(latestPrice.close));
-    } else {
-      positionsValue = positionsValue.add(pos.quantity.mul(pos.avgCost));
-    }
+    const multiplier = pos.security.multiplier || new Decimal(1);
+    const price = latestPrice ? latestPrice.close : pos.avgCost;
+    positionsValue = positionsValue.add(pos.quantity.mul(multiplier).mul(price));
   }
 
   const cashBalance = new Decimal(0);
