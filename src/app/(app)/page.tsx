@@ -28,23 +28,24 @@ async function getDashboardData() {
   const priceMap = await getLatestPrices(securityIds);
 
   const enrichedPositions = positions.map((pos) => {
-    const currentPrice = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
+    const rawPrice = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
     const qty = Number(pos.quantity);
     const absQty = Math.abs(qty);
     const multiplier = pos.security.type === "OPTION" ? 100 : 1;
     const costBasis = Number(pos.costBasis);
-    const marketValue = absQty * multiplier * currentPrice;
+    const marketValue = absQty * rawPrice * multiplier;
     const isShort = qty < 0;
     const pnl = isShort ? (costBasis - marketValue) : (marketValue - costBasis);
     const pnlPercent = costBasis > 0 ? (pnl / costBasis) * 100 : 0;
+    const avgCost = costBasis > 0 ? costBasis / absQty / multiplier : 0;
 
     return {
       symbol: pos.security.symbol,
       name: pos.security.name,
       market: pos.security.market,
       quantity: qty,
-      avgCost: Number(pos.avgCost),
-      currentPrice,
+      avgCost,
+      currentPrice: rawPrice,
       marketValue,
       pnl,
       pnlPercent,

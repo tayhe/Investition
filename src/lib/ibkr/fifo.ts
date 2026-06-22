@@ -20,24 +20,26 @@ export async function calculateFifoCostBasis(
 
   for (const trade of trades) {
     const symbol = trade.security.symbol;
+    const multiplier = trade.security.type === "OPTION" ? 100 : 1;
     if (!lotsMap.has(symbol)) {
       lotsMap.set(symbol, []);
     }
     const lots = lotsMap.get(symbol)!;
     const qty = Number(trade.quantity);
-    const price = Number(trade.price);
+    const pricePerShare = Number(trade.price);
     const commission = trade.commission ? Number(trade.commission) : 0;
 
+    const pricePerContract = pricePerShare * multiplier;
+
     if (trade.side === "BUY") {
-      const totalCost = qty * price + commission;
+      const totalCost = qty * pricePerContract + commission;
       lots.push({
         quantity: qty,
         costPerUnit: totalCost / qty,
         totalCost,
       });
     } else if (trade.side === "SELL") {
-      let remaining = qty;
-      const sellProceeds = qty * price - commission;
+      let remaining = Math.abs(qty);
 
       while (remaining > 0 && lots.length > 0) {
         const lot = lots[0];
@@ -86,8 +88,8 @@ export async function updatePositionsWithFifo(accountId: string) {
     const fifo = fifoResult.get(symbol);
 
     if (fifo && fifo.avgCost > 0) {
-      const posQty = Number(pos.quantity);
-      const costBasis = fifo.avgCost * Math.abs(posQty);
+      const posQty = Math.abs(Number(pos.quantity));
+      const costBasis = fifo.avgCost * posQty;
 
       await db.position.update({
         where: { id: pos.id },
