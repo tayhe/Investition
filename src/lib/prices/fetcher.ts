@@ -10,7 +10,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function toYahooSymbol(ibkrSymbol: string, exchange: string): string | null {
   if (ibkrSymbol.includes("=")) return null;
-  if (/\d{6}[CP]\d{8}/.test(ibkrSymbol)) return null;
+
+  const optionMatch = ibkrSymbol.match(/^(\S+)\s+(\d{6}[CP]\d{8})$/);
+  if (optionMatch) {
+    return `${optionMatch[1]}${optionMatch[2]}`;
+  }
 
   if (ibkrSymbol.includes(".")) {
     const parts = ibkrSymbol.split(".");
