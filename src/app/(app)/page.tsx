@@ -33,11 +33,15 @@ async function getDashboardData() {
   const securityIds = [...new Set(positions.map((p) => p.securityId))];
   const priceMap = await getLatestPrices(securityIds);
 
-  const totalValue = positions.reduce((sum, pos) => {
+  const cashBalance = 5000;
+
+  const positionsValue = positions.reduce((sum, pos) => {
     const price = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
     const mult = pos.security.type === "OPTION" ? 100 : 1;
     return sum + Number(pos.quantity) * mult * price;
   }, 0);
+
+  const totalValue = positionsValue + cashBalance;
 
   const totalPnl = positions.reduce((sum, pos) => {
     const price = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
@@ -68,6 +72,7 @@ async function getDashboardData() {
     stats: {
       totalValue,
       totalPnl,
+      cashBalance,
       positionCount: positions.length,
       maxDrawdown,
       currency: accounts[0].currency,
@@ -103,7 +108,7 @@ export default async function Dashboard() {
         <StatCard
           title="总资产"
           value={formatCurrency(stats.totalValue, stats.currency)}
-          subtitle={stats.currency}
+          subtitle={`${stats.currency} (含现金 ${formatCurrency(stats.cashBalance, stats.currency)})`}
         />
         <StatCard
           title="总盈亏"
