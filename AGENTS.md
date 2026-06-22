@@ -82,11 +82,35 @@ const xmlToParse = lastStatementIdx >= 0 ? xml.slice(lastStatementIdx) : xml;
 - OpenPosition 是 tax lot 级别，同一 symbol 有多条记录，需按 symbol 聚合
 - OpenPosition 包含已过期期权，需按 expiry 日期过滤
 - `costBasisPrice` 可能为 0（Flex Query 未配置成本字段时）
+- 多 statement 中同一交易会重复（commission 正负不同），需按 `ibOrderID + side + qty + price` 去重
+- FlexCache 年份从 XML `fromDate` 提取，不依赖系统时间
+
+### 期权计算（美股）
+
+美股期权 1 手 = 100 股。核心公式（quantity 用真实值，负=空头）：
+
+```
+avgCost      = 每股价格（IBKR 原始 / FIFO 计算）
+currentPrice = 每股价格（Yahoo 原始）
+costBasis    = quantity × 100 × avgCost（做空为负值）
+marketValue  = quantity × 100 × currentPrice（做空为负值）
+pnl          = marketValue - costBasis（统一公式，无需分支）
+```
+
+注意：Prisma Decimal 在 Server Component 中 `Number()` 返回 NaN，不能用。改用 `type === "OPTION" ? 100 : 1`。
+
+### FIFO 成本计算
+
+支持双向（做多+做空）：
+- BUY：先关空仓 lots（FIFO），再创建/合并多仓 lots
+- SELL：先关多仓 lots（FIFO），再创建/合并空仓 lots
+- 剩余 lots 的加权平均 = avgCost（每股）
 
 ### Yahoo Finance 符号映射
 
 - 外汇对：`USD.CNH` → `USDCNH=X`
 - 瑞典股票：`SIVE` (SFB) → `SIVE.ST`
+- 期权：`GOOGL 261016P00325000` → `GOOGL261016P00325000`（去空格）
 - 其他交易所后缀：`.L` (伦敦)、`.DE` (法兰克福)、`.T` (东京) 等
 
 ### 项目结构
