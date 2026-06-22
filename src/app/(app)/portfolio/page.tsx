@@ -26,16 +26,16 @@ async function getPortfolioData() {
   const priceMap = await getLatestPrices(securityIds);
 
   const enriched = positions.map((pos) => {
-    const rawPrice = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
+    const currentPrice = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
     const qty = Number(pos.quantity);
     const absQty = Math.abs(qty);
+    const avgCost = Number(pos.avgCost);
     const multiplier = pos.security.type === "OPTION" ? 100 : 1;
-    const costBasis = Number(pos.costBasis);
-    const marketValue = absQty * rawPrice * multiplier;
+    const costBasis = absQty * multiplier * avgCost;
+    const marketValue = absQty * multiplier * currentPrice;
     const isShort = qty < 0;
     const pnl = isShort ? (costBasis - marketValue) : (marketValue - costBasis);
     const pnlPercent = costBasis > 0 ? (pnl / costBasis) * 100 : 0;
-    const avgCost = costBasis > 0 ? costBasis / absQty / multiplier : 0;
 
     return {
       symbol: pos.security.symbol,
@@ -43,7 +43,7 @@ async function getPortfolioData() {
       market: pos.security.market,
       quantity: qty,
       avgCost,
-      currentPrice: rawPrice,
+      currentPrice,
       marketValue,
       pnl,
       pnlPercent,

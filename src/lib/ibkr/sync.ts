@@ -267,7 +267,7 @@ export async function upsertPositions(accountId: string, report: FlexReport) {
       update: {
         quantity: new Decimal(pos.quantity.toString()),
         avgCost: new Decimal(pos.averageCost.toString()),
-        costBasis: new Decimal((pos.averageCost * Math.abs(pos.quantity)).toString()),
+        costBasis: new Decimal(0),
         updatedAt: new Date(),
       },
       create: {
@@ -275,7 +275,7 @@ export async function upsertPositions(accountId: string, report: FlexReport) {
         securityId: security.id,
         quantity: new Decimal(pos.quantity.toString()),
         avgCost: new Decimal(pos.averageCost.toString()),
-        costBasis: new Decimal((pos.averageCost * Math.abs(pos.quantity)).toString()),
+        costBasis: new Decimal(0),
         currency: pos.currency,
       },
     });

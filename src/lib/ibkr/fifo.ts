@@ -9,7 +9,7 @@ interface Lot {
 
 export async function calculateFifoCostBasis(
   accountId: string
-): Promise<Map<string, { avgCost: number; totalCost: number; quantity: number }>> {
+): Promise<Map<string, { avgCost: number; quantity: number }>> {
   const trades = await db.trade.findMany({
     where: { accountId },
     include: { security: true },
@@ -20,19 +20,16 @@ export async function calculateFifoCostBasis(
 
   for (const trade of trades) {
     const symbol = trade.security.symbol;
-    const multiplier = trade.security.type === "OPTION" ? 100 : 1;
     if (!lotsMap.has(symbol)) {
       lotsMap.set(symbol, []);
     }
     const lots = lotsMap.get(symbol)!;
     const qty = Number(trade.quantity);
-    const pricePerShare = Number(trade.price);
+    const price = Number(trade.price);
     const commission = trade.commission ? Number(trade.commission) : 0;
 
-    const pricePerContract = pricePerShare * multiplier;
-
     if (trade.side === "BUY") {
-      const totalCost = qty * pricePerContract + commission;
+      const totalCost = qty * price + commission;
       lots.push({
         quantity: qty,
         costPerUnit: totalCost / qty,
@@ -55,7 +52,7 @@ export async function calculateFifoCostBasis(
     }
   }
 
-  const result = new Map<string, { avgCost: number; totalCost: number; quantity: number }>();
+  const result = new Map<string, { avgCost: number; quantity: number }>();
 
   for (const [symbol, lots] of lotsMap) {
     if (lots.length === 0) continue;
@@ -64,7 +61,6 @@ export async function calculateFifoCostBasis(
     if (totalQty > 0) {
       result.set(symbol, {
         avgCost: totalCost / totalQty,
-        totalCost,
         quantity: totalQty,
       });
     }
@@ -88,17 +84,16 @@ export async function updatePositionsWithFifo(accountId: string) {
     const fifo = fifoResult.get(symbol);
 
     if (fifo && fifo.avgCost > 0) {
-      const posQty = Math.abs(Number(pos.quantity));
-      const costBasis = fifo.avgCost * posQty;
-
-      await db.position.update({
-        where: { id: pos.id },
-        data: {
-          avgCost: new Prisma.Decimal(fifo.avgCost.toFixed(6)),
-          costBasis: new Prisma.Decimal(costBasis.toFixed(4)),
-        },
-      });
-      updated++;
+      const currentAvg = Number(pos.avgCost);
+      if (Math.abs(currentAvg - fifo.avgCost) > 0.0001) {
+        await db.position.update({
+          where: { id: pos.id },
+          data: {
+            avgCost: new Prisma.Decimal(fifo.avgCost.toFixed(6)),
+          },
+        });
+        updated++;
+      }
     }
   }
 
