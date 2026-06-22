@@ -265,3 +265,65 @@ export function mapIbkrExchangeToMarket(exchange: string): "US" | "HK" | "A" {
 export function normalizeSymbol(flexSymbol: string, exchange: string): string {
   return flexSymbol;
 }
+
+export interface DailyPositionData {
+  date: string;
+  symbol: string;
+  conid: string;
+  exchange: string;
+  quantity: number;
+  marketPrice: number;
+  marketValue: number;
+  currency: string;
+  contractType: string;
+}
+
+export function parseAllDailyPositions(xml: string): DailyPositionData[] {
+  const results: DailyPositionData[] = [];
+  const statementRegex = /<FlexStatement[^>]*fromDate="(\d{4})(\d{2})(\d{2})"[^>]*>/g;
+  let stmtMatch;
+
+  while ((stmtMatch = statementRegex.exec(xml)) !== null) {
+    const stmtStart = stmtMatch.index;
+    const stmtDate = `${stmtMatch[1]}-${stmtMatch[2]}-${stmtMatch[3]}`;
+
+    const nextStmtIdx = xml.indexOf("<FlexStatement", stmtStart + 1);
+    const stmtXml = nextStmtIdx >= 0 ? xml.slice(stmtStart, nextStmtIdx) : xml.slice(stmtStart);
+
+    const posRegex = /<OpenPosition\s+([^>]*)\/>|<ComplexPosition\s+([^>]*)\/>/g;
+    let posMatch;
+    while ((posMatch = posRegex.exec(stmtXml)) !== null) {
+      const attrs = parseXmlAttributes(posMatch[1] || posMatch[2]);
+      const quantity = parseFloat(attrs.position || attrs.quantity || "0");
+      if (quantity === 0) continue;
+
+      const assetCategory = (attrs.assetCategory || attrs.assetClass || attrs.contractType || "STK").toUpperCase();
+      if (assetCategory === "OPT") {
+        const expiryStr = attrs.expiry || "";
+        if (expiryStr.length >= 8) {
+          const expYear = parseInt(expiryStr.slice(0, 4));
+          const expMonth = parseInt(expiryStr.slice(4, 6)) - 1;
+          const expDay = parseInt(expiryStr.slice(6, 8));
+          if (new Date(expYear, expMonth, expDay) < new Date(stmtDate)) continue;
+        }
+      }
+
+      const marketPrice = parseFloat(attrs.markPrice || attrs.closePrice || attrs.marketPrice || "0");
+      const marketValue = parseFloat(attrs.positionValue || attrs.value || attrs.marketValue || "0");
+
+      results.push({
+        date: stmtDate,
+        symbol: attrs.symbol || "",
+        conid: attrs.conid || "",
+        exchange: attrs.listingExchange || attrs.exchange || "",
+        quantity,
+        marketPrice,
+        marketValue,
+        currency: attrs.currency || "USD",
+        contractType: assetCategory,
+      });
+    }
+  }
+
+  return results;
+}

@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { syncIbkrFlex, parseFlexXml, type IbkrFlexConfig, type FlexReport } from "./flex";
+import { syncIbkrFlex, parseFlexXml, parseAllDailyPositions, type IbkrFlexConfig, type FlexReport } from "./flex";
 import { mapIbkrExchangeToMarket } from "./flex";
 import { updatePositionsWithFifo } from "./fifo";
 import { Prisma } from "@/generated/prisma/client";
@@ -117,6 +117,7 @@ export async function syncAccountData(accountId: string, force = false): Promise
   const tradesCount = await upsertTrades(accountId, report);
   await upsertPositions(accountId, report);
   await updatePositionsWithFifo(accountId);
+  await storeDailyPositions(accountId, rawXml);
 
   return { trades: tradesCount, positions: report.positions.length, fromCache };
 }
@@ -134,8 +135,49 @@ export async function syncFromCache(accountId: string): Promise<{ trades: number
   const tradesCount = await upsertTrades(accountId, report);
   await upsertPositions(accountId, report);
   await updatePositionsWithFifo(accountId);
+  await storeDailyPositions(accountId, cached.xml);
 
   return { trades: tradesCount, positions: report.positions.length };
+}
+
+async function storeDailyPositions(accountId: string, xml: string) {
+  const dailyData = parseAllDailyPositions(xml);
+  if (dailyData.length === 0) return;
+
+  for (const dp of dailyData) {
+    const security = await db.security.findUnique({
+      where: { symbol_exchange: { symbol: dp.symbol, exchange: dp.exchange } },
+    });
+    if (!security) continue;
+
+    const date = new Date(dp.date);
+    date.setHours(0, 0, 0, 0);
+
+    await db.dailyPosition.upsert({
+      where: {
+        accountId_securityId_date: {
+          accountId,
+          securityId: security.id,
+          date,
+        },
+      },
+      update: {
+        quantity: new Decimal(dp.quantity.toString()),
+        marketPrice: new Decimal(dp.marketPrice.toString()),
+        marketValue: new Decimal(dp.marketValue.toString()),
+        currency: dp.currency,
+      },
+      create: {
+        accountId,
+        securityId: security.id,
+        date,
+        quantity: new Decimal(dp.quantity.toString()),
+        marketPrice: new Decimal(dp.marketPrice.toString()),
+        marketValue: new Decimal(dp.marketValue.toString()),
+        currency: dp.currency,
+      },
+    });
+  }
 }
 
 async function getOrCreateSecurity(ibkrSymbol: string, exchange: string, description: string, currency: string, assetClass?: string, multiplier?: number) {

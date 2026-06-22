@@ -5,30 +5,64 @@ import { AnalyticsCharts } from "./analytics-charts";
 
 async function getAnalyticsData() {
   const session = await auth();
-  if (!session?.user?.id) return { snapshots: [], monthlyData: [], positionRanking: [] };
+  if (!session?.user?.id) {
+    return { snapshots: [], dailyPositions: {} as Record<string, Array<{ symbol: string; name: string; quantity: number; marketValue: number; marketPrice: number; currency: string }>>, monthlyData: [], positionRanking: [] };
+  }
 
   const accounts = await db.account.findMany({
     where: { userId: session.user.id },
   });
-  if (accounts.length === 0) return { snapshots: [], monthlyData: [], positionRanking: [] };
+  if (accounts.length === 0) {
+    return { snapshots: [], dailyPositions: {} as Record<string, Array<{ symbol: string; name: string; quantity: number; marketValue: number; marketPrice: number; currency: string }>>, monthlyData: [], positionRanking: [] };
+  }
 
   const accountIds = accounts.map((a) => a.id);
+  const now = new Date();
+  const yearStart = new Date(now.getFullYear(), 0, 1);
 
-  const [snapshots, positions] = await Promise.all([
+  const [snapshots, positions, dailyPositions] = await Promise.all([
     db.snapshot.findMany({
-      where: { accountId: { in: accountIds } },
+      where: { accountId: { in: accountIds }, date: { gte: yearStart } },
       orderBy: { date: "asc" },
     }),
     db.position.findMany({
       where: { accountId: { in: accountIds }, quantity: { not: 0 } },
       include: { security: true },
     }),
+    db.dailyPosition.findMany({
+      where: { accountId: { in: accountIds }, date: { gte: yearStart } },
+      include: { security: true },
+      orderBy: { date: "asc" },
+    }),
   ]);
 
   const securityIds = [...new Set(positions.map((p) => p.securityId))];
   const priceMap = await getLatestPrices(securityIds);
 
-  // Monthly data
+  // Current position P&L ranking
+  const positionRanking = positions
+    .map((pos) => {
+      const price = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
+      const mult = pos.security.type === "OPTION" ? 100 : 1;
+      const qty = Number(pos.quantity);
+      const costBasis = qty * mult * Number(pos.avgCost);
+      const marketValue = qty * mult * price;
+      const pnl = marketValue - costBasis;
+      return {
+        symbol: pos.security.symbol,
+        name: pos.security.name,
+        pnl,
+        contribution: 0,
+      };
+    })
+    .sort((a, b) => b.pnl - a.pnl);
+
+  const totalPnl = positionRanking.reduce((sum, p) => sum + p.pnl, 0);
+  for (const p of positionRanking) {
+    p.contribution = totalPnl !== 0 ? (p.pnl / Math.abs(totalPnl)) * 100 : 0;
+  }
+
+  // Monthly data from snapshots
   const monthlyMap = new Map<string, { startValue: number; endValue: number; pnl: number }>();
   for (const s of snapshots) {
     const month = s.date.toISOString().slice(0, 7);
@@ -50,45 +84,42 @@ async function getAnalyticsData() {
       returnRate: data.startValue > 0 ? ((data.endValue - data.startValue) / data.startValue) * 100 : 0,
     }));
 
-  // Position P&L ranking
-  const positionPnl = positions.map((pos) => {
-    const price = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
-    const mult = pos.security.type === "OPTION" ? 100 : 1;
-    const qty = Number(pos.quantity);
-    const costBasis = qty * mult * Number(pos.avgCost);
-    const marketValue = qty * mult * price;
-    const pnl = marketValue - costBasis;
-    return {
-      symbol: pos.security.symbol,
-      name: pos.security.name,
-      pnl,
-      costBasis: Math.abs(costBasis),
-    };
-  });
-
-  const totalPnl = positionPnl.reduce((sum, p) => sum + p.pnl, 0);
-  const positionRanking = positionPnl
-    .sort((a, b) => b.pnl - a.pnl)
-    .map((p) => ({
-      symbol: p.symbol,
-      name: p.name,
-      pnl: p.pnl,
-      contribution: totalPnl !== 0 ? (p.pnl / Math.abs(totalPnl)) * 100 : 0,
-    }));
+  // Daily position data grouped by date
+  const dailyPositionMap = new Map<string, typeof dailyPositions>();
+  for (const dp of dailyPositions) {
+    const dateKey = dp.date.toISOString().slice(0, 10);
+    if (!dailyPositionMap.has(dateKey)) dailyPositionMap.set(dateKey, []);
+    dailyPositionMap.get(dateKey)!.push(dp);
+  }
 
   return {
     snapshots: snapshots.map((s) => ({
       date: s.date.toISOString().split("T")[0],
       value: Number(s.totalValue),
+      dailyReturn: s.dailyReturn ? Number(s.dailyReturn) : null,
+      dailyPnl: s.dailyPnl ? Number(s.dailyPnl) : null,
       maxDrawdown: s.maxDrawdown ? Number(s.maxDrawdown) : null,
     })),
+    dailyPositions: Object.fromEntries(
+      Array.from(dailyPositionMap.entries()).map(([date, dps]) => [
+        date,
+        dps.map((dp) => ({
+          symbol: dp.security.symbol,
+          name: dp.security.name,
+          quantity: Number(dp.quantity),
+          marketValue: Number(dp.marketValue),
+          marketPrice: Number(dp.marketPrice),
+          currency: dp.currency,
+        })),
+      ])
+    ) as Record<string, Array<{ symbol: string; name: string; quantity: number; marketValue: number; marketPrice: number; currency: string }>>,
     monthlyData,
     positionRanking,
   };
 }
 
 export default async function AnalyticsPage() {
-  const { snapshots, monthlyData, positionRanking } = await getAnalyticsData();
+  const { snapshots, dailyPositions, monthlyData, positionRanking } = await getAnalyticsData();
 
   return (
     <div className="space-y-8">
@@ -98,6 +129,7 @@ export default async function AnalyticsPage() {
       </div>
       <AnalyticsCharts
         snapshots={snapshots}
+        dailyPositions={dailyPositions}
         monthlyData={monthlyData}
         positionRanking={positionRanking}
       />

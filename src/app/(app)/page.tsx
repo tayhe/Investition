@@ -16,13 +16,16 @@ async function getDashboardData() {
 
   const accountIds = accounts.map((a) => a.id);
 
+  const now = new Date();
+  const yearStart = new Date(now.getFullYear(), 0, 1);
+
   const [positions, snapshots] = await Promise.all([
     db.position.findMany({
       where: { accountId: { in: accountIds }, quantity: { not: 0 } },
       include: { security: true },
     }),
     db.snapshot.findMany({
-      where: { accountId: { in: accountIds } },
+      where: { accountId: { in: accountIds }, date: { gte: yearStart } },
       orderBy: { date: "asc" },
     }),
   ]);
@@ -45,16 +48,23 @@ async function getDashboardData() {
     return sum + (mv - cost);
   }, 0);
 
+  const monthlySnapshots = new Map<string, number>();
+  for (const s of snapshots) {
+    const month = s.date.toISOString().slice(0, 7);
+    monthlySnapshots.set(month, Number(s.totalValue));
+  }
+
+  const curveData = Array.from(monthlySnapshots.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, value]) => ({ date: date.slice(5) + "月", value }));
+
   const maxDrawdown = snapshots.reduce(
     (min, s) => (s.maxDrawdown && Number(s.maxDrawdown) < min ? Number(s.maxDrawdown) : min),
     0
   );
 
   return {
-    snapshots: snapshots.map((s) => ({
-      date: s.date.toISOString().split("T")[0],
-      value: Number(s.totalValue),
-    })),
+    snapshots: curveData,
     stats: {
       totalValue,
       totalPnl,

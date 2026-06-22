@@ -70,9 +70,10 @@ model Security {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 
-  positions Position[]
-  trades    Trade[]
-  prices    Price[]
+  positions      Position[]
+  trades         Trade[]
+  prices         Price[]
+  dailyPositions DailyPosition[]
 
   @@unique([symbol, exchange])
   @@index([market])
@@ -208,4 +209,22 @@ model FlexCache {
 
   @@unique([accountId, year])
   @@index([accountId])
+}
+
+// ─── Daily Position Snapshots ─────────────────────────────────
+
+model DailyPosition {
+  id          String   @id @default(cuid())
+  accountId   String
+  securityId  String
+  date        DateTime @db.Date
+  quantity    Decimal  @db.Decimal(18, 6)
+  marketPrice Decimal  @db.Decimal(18, 6)
+  marketValue Decimal  @db.Decimal(18, 4)
+  currency    String
+
+  security Security @relation(fields: [securityId], references: [id])
+
+  @@unique([accountId, securityId, date])
+  @@index([accountId, date])
 }
