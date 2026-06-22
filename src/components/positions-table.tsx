@@ -9,7 +9,9 @@ interface PositionRow {
   quantity: number;
   avgCost: number;
   currentPrice: number;
+  usdPrice?: number;
   marketValue: number;
+  usdMarketValue?: number;
   pnl: number;
   pnlPercent: number;
   currency: string;
@@ -42,32 +44,41 @@ export function PositionsTable({ positions }: PositionsTableProps) {
           </tr>
         </thead>
         <tbody>
-          {positions.map((pos) => (
-            <tr key={pos.symbol} className="border-b border-default last:border-0 hover:bg-accent/50">
-              <td className="py-3 px-4">
-                <div className="font-medium text-sm">{pos.symbol}</div>
-                <div className="text-xs text-muted">{pos.name}</div>
-              </td>
-              <td className="text-right py-3 px-4 text-sm">{pos.quantity}</td>
-              <td className="text-right py-3 px-4 text-sm">
-                {formatCurrency(pos.avgCost, pos.currency)}
-              </td>
-              <td className="text-right py-3 px-4 text-sm">
-                {formatCurrency(pos.currentPrice, pos.currency)}
-              </td>
-              <td className="text-right py-3 px-4 text-sm font-medium">
-                {formatCurrency(pos.marketValue, pos.currency)}
-              </td>
-              <td className="text-right py-3 px-4">
-                <div className={`text-sm font-medium ${getReturnColor(pos.pnl)}`}>
-                  {formatCurrency(pos.pnl, pos.currency)}
-                </div>
-                <div className={`text-xs ${getReturnColor(pos.pnlPercent)}`}>
-                  {formatPercent(pos.pnlPercent)}
-                </div>
-              </td>
-            </tr>
-          ))}
+          {positions.map((pos) => {
+            const isNonUsd = pos.currency !== "USD" && pos.usdMarketValue !== undefined;
+            return (
+              <tr key={pos.symbol} className="border-b border-default last:border-0 hover:bg-accent/50">
+                <td className="py-3 px-4">
+                  <div className="font-medium text-sm">{pos.symbol}</div>
+                  <div className="text-xs text-muted">{pos.name}</div>
+                </td>
+                <td className="text-right py-3 px-4 text-sm">{pos.quantity}</td>
+                <td className="text-right py-3 px-4 text-sm">
+                  {formatCurrency(pos.avgCost, pos.currency)}
+                </td>
+                <td className="text-right py-3 px-4 text-sm">
+                  <div>{formatCurrency(pos.currentPrice, pos.currency)}</div>
+                  {isNonUsd && pos.usdPrice !== undefined && (
+                    <div className="text-xs text-muted">≈${pos.usdPrice.toFixed(2)}</div>
+                  )}
+                </td>
+                <td className="text-right py-3 px-4 text-sm font-medium">
+                  <div>{formatCurrency(pos.marketValue, pos.currency)}</div>
+                  {isNonUsd && pos.usdMarketValue !== undefined && (
+                    <div className="text-xs text-muted">≈${pos.usdMarketValue.toFixed(2)}</div>
+                  )}
+                </td>
+                <td className="text-right py-3 px-4">
+                  <div className={`text-sm font-medium ${getReturnColor(pos.pnl)}`}>
+                    {formatCurrency(pos.pnl, pos.currency)}
+                  </div>
+                  <div className={`text-xs ${getReturnColor(pos.pnlPercent)}`}>
+                    {formatPercent(pos.pnlPercent)}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

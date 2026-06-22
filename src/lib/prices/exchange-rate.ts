@@ -11,6 +11,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const PAIRS: [string, string][] = [
   ["USD", "CNY"],
   ["USD", "HKD"],
+  ["USD", "SEK"],
   ["HKD", "CNY"],
 ];
 

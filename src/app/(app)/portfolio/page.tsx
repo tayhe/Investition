@@ -4,6 +4,27 @@ import { auth } from "@/lib/auth";
 import { formatCurrency } from "@/lib/utils";
 import { getLatestPrices } from "@/lib/prices/cache";
 
+async function getLatestRates(): Promise<Map<string, number>> {
+  const rates = await db.exchangeRate.findMany({
+    orderBy: { date: "desc" },
+  });
+  const map = new Map<string, number>();
+  for (const r of rates) {
+    const key = `${r.baseCurrency}_${r.quoteCurrency}`;
+    if (!map.has(key)) map.set(key, Number(r.rate));
+  }
+  return map;
+}
+
+function convertToUsd(amount: number, currency: string, rates: Map<string, number>): number {
+  if (currency === "USD") return amount;
+  const direct = rates.get(`USD_${currency}`);
+  if (direct) return amount / direct;
+  const inverse = rates.get(`${currency}_USD`);
+  if (inverse) return amount * inverse;
+  return amount;
+}
+
 async function getPortfolioData() {
   const session = await auth();
   if (!session?.user?.id) return { positions: [], marketSummary: [] };
@@ -23,7 +44,10 @@ async function getPortfolioData() {
   });
 
   const securityIds = [...new Set(positions.map((p) => p.securityId))];
-  const priceMap = await getLatestPrices(securityIds);
+  const [priceMap, rates] = await Promise.all([
+    getLatestPrices(securityIds),
+    getLatestRates(),
+  ]);
 
   const enriched = positions.map((pos) => {
     const currentPrice = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
@@ -34,6 +58,9 @@ async function getPortfolioData() {
     const marketValue = qty * multiplier * currentPrice;
     const pnl = marketValue - costBasis;
     const pnlPercent = costBasis !== 0 ? (pnl / Math.abs(costBasis)) * 100 : 0;
+    const usdMarketValue = convertToUsd(marketValue, pos.currency, rates);
+    const rate = pos.currency === "USD" ? 1 : (rates.get(`USD_${pos.currency}`) ? 1 / rates.get(`USD_${pos.currency}`)! : rates.get(`${pos.currency}_USD`) ?? 1);
+    const usdPrice = currentPrice * rate;
 
     return {
       symbol: pos.security.symbol,
@@ -42,14 +69,16 @@ async function getPortfolioData() {
       quantity: qty,
       avgCost,
       currentPrice,
+      usdPrice,
       marketValue,
+      usdMarketValue,
       pnl,
       pnlPercent,
       currency: pos.currency,
     };
   });
 
-  enriched.sort((a, b) => Math.abs(b.marketValue) - Math.abs(a.marketValue));
+  enriched.sort((a, b) => Math.abs(b.usdMarketValue) - Math.abs(a.usdMarketValue));
 
   const marketMap = new Map<string, { value: number; pnl: number; currency: string }>();
   for (const pos of enriched) {
