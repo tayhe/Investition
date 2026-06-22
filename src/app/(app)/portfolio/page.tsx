@@ -49,6 +49,8 @@ async function getPortfolioData() {
     };
   });
 
+  enriched.sort((a, b) => Math.abs(b.marketValue) - Math.abs(a.marketValue));
+
   const marketMap = new Map<string, { value: number; pnl: number; currency: string }>();
   for (const pos of enriched) {
     const existing = marketMap.get(pos.market) || { value: 0, pnl: 0, currency: pos.currency };
