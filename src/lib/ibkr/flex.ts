@@ -14,9 +14,10 @@ export interface FlexTrade {
   tradeTime: string;
   buySell: "BUY" | "SELL";
   quantity: number;
-  tradePrice: number;
-  tradeMoney: number;
-  ibCommission: number;
+  price: number;
+  amount: number;
+  commission: number;
+  cost: number;
   currency: string;
   ibOrderID: string;
   conid: string;
@@ -120,11 +121,11 @@ export function parseFlexXml(xml: string): FlexReport {
   const trades: FlexTrade[] = [];
 
   const lastStatementIdx = xml.lastIndexOf("<FlexStatement");
-  const xmlToParse = lastStatementIdx >= 0 ? xml.slice(lastStatementIdx) : xml;
+  const lastXml = lastStatementIdx >= 0 ? xml.slice(lastStatementIdx) : xml;
 
   const tradeRegex = /<Trade\s+([^>]*)\/>/g;
   let match;
-  while ((match = tradeRegex.exec(xmlToParse)) !== null) {
+  while ((match = tradeRegex.exec(xml)) !== null) {
     const attrs = parseXmlAttributes(match[1]);
     const dateTime = attrs.dateTime || "";
     const dateParts = dateTime.split(";");
@@ -132,7 +133,7 @@ export function parseFlexXml(xml: string): FlexReport {
     const tradeTime = dateParts[1] || attrs.tradeTime || "";
 
     trades.push({
-      transactionId: attrs.transactionId || "",
+      transactionId: attrs.transactionId || attrs.tradeID || "",
       symbol: attrs.symbol || "",
       description: attrs.description || "",
       exchange: attrs.exchange || "",
@@ -140,13 +141,14 @@ export function parseFlexXml(xml: string): FlexReport {
       tradeTime,
       buySell: (attrs.buySell as "BUY" | "SELL") || "BUY",
       quantity: parseFloat(attrs.quantity || "0"),
-      tradePrice: parseFloat(attrs.tradePrice || "0"),
-      tradeMoney: parseFloat(attrs.tradeMoney || "0"),
-      ibCommission: parseFloat(attrs.ibCommission || "0"),
+      price: parseFloat(attrs.tradePrice || "0"),
+      amount: parseFloat(attrs.tradeMoney || "0"),
+      commission: Math.abs(parseFloat(attrs.ibCommission || "0")),
+      cost: parseFloat(attrs.cost || "0"),
       currency: attrs.currency || "USD",
       ibOrderID: attrs.ibOrderID || "",
       conid: attrs.conid || "",
-      contractType: attrs.assetClass || attrs.contractType || "STK",
+      contractType: attrs.assetCategory || attrs.contractType || "STK",
     });
   }
 
@@ -155,7 +157,7 @@ export function parseFlexXml(xml: string): FlexReport {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  while ((match = posRegex.exec(xmlToParse)) !== null) {
+  while ((match = posRegex.exec(lastXml)) !== null) {
     const attrStr = match[1] || match[2];
     const attrs = parseXmlAttributes(attrStr);
     const quantity = parseFloat(attrs.position || attrs.quantity || "0");
@@ -222,6 +224,23 @@ export function parseFlexXml(xml: string): FlexReport {
   }
 
   const positions = Array.from(posMap.values());
+
+  const tradeCostMap = new Map<string, { totalCost: number; totalQty: number }>();
+  for (const t of trades) {
+    if (t.buySell !== "BUY") continue;
+    const existing = tradeCostMap.get(t.symbol) || { totalCost: 0, totalQty: 0 };
+    existing.totalCost += t.cost || t.amount + t.commission;
+    existing.totalQty += t.quantity;
+    tradeCostMap.set(t.symbol, existing);
+  }
+
+  for (const pos of positions) {
+    if (pos.averageCost > 0) continue;
+    const tradeData = tradeCostMap.get(pos.symbol);
+    if (tradeData && tradeData.totalQty > 0) {
+      pos.averageCost = tradeData.totalCost / tradeData.totalQty;
+    }
+  }
 
   return { trades, positions };
 }
