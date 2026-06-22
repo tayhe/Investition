@@ -86,17 +86,17 @@ export async function updatePositionsWithFifo(accountId: string) {
     const fifo = fifoResult.get(symbol);
 
     if (fifo && fifo.avgCost > 0) {
-      const currentAvgCost = Number(pos.avgCost);
-      if (Math.abs(currentAvgCost - fifo.avgCost) > 0.001) {
-        await db.position.update({
-          where: { id: pos.id },
-          data: {
-            avgCost: new Prisma.Decimal(fifo.avgCost.toFixed(6)),
-            costBasis: new Prisma.Decimal(fifo.totalCost.toFixed(4)),
-          },
-        });
-        updated++;
-      }
+      const posQty = Number(pos.quantity);
+      const costBasis = fifo.avgCost * Math.abs(posQty);
+
+      await db.position.update({
+        where: { id: pos.id },
+        data: {
+          avgCost: new Prisma.Decimal(fifo.avgCost.toFixed(6)),
+          costBasis: new Prisma.Decimal(costBasis.toFixed(4)),
+        },
+      });
+      updated++;
     }
   }
 

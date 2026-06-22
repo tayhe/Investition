@@ -119,8 +119,6 @@ export async function syncIbkrFlex(config: IbkrFlexConfig): Promise<FlexSyncResu
 }
 
 export function parseFlexXml(xml: string): FlexReport {
-  const trades: FlexTrade[] = [];
-
   const lastStatementIdx = xml.lastIndexOf("<FlexStatement");
   const lastXml = lastStatementIdx >= 0 ? xml.slice(lastStatementIdx) : xml;
 
@@ -131,6 +129,7 @@ export function parseFlexXml(xml: string): FlexReport {
   }
 
   const tradeRegex = /<Trade\s+([^>]*)\/>/g;
+  const tradeMap = new Map<string, FlexTrade>();
   let match;
   while ((match = tradeRegex.exec(xml)) !== null) {
     const attrs = parseXmlAttributes(match[1]);
@@ -138,8 +137,14 @@ export function parseFlexXml(xml: string): FlexReport {
     const dateParts = dateTime.split(";");
     const tradeDate = attrs.tradeDate || dateParts[0] || "";
     const tradeTime = dateParts[1] || attrs.tradeTime || "";
+    const ibOrderID = attrs.ibOrderID || "";
 
-    trades.push({
+    const dedupKey = ibOrderID
+      ? `${ibOrderID}_${attrs.buySell}_${attrs.quantity}_${attrs.tradePrice}`
+      : `${attrs.symbol}_${tradeDate}_${attrs.buySell}_${attrs.quantity}_${attrs.tradePrice}`;
+    if (tradeMap.has(dedupKey)) continue;
+
+    tradeMap.set(dedupKey, {
       transactionId: attrs.transactionId || attrs.tradeID || "",
       symbol: attrs.symbol || "",
       description: attrs.description || "",
@@ -153,11 +158,13 @@ export function parseFlexXml(xml: string): FlexReport {
       commission: Math.abs(parseFloat(attrs.ibCommission || "0")),
       cost: parseFloat(attrs.cost || "0"),
       currency: attrs.currency || "USD",
-      ibOrderID: attrs.ibOrderID || "",
+      ibOrderID,
       conid: attrs.conid || "",
       contractType: attrs.assetCategory || attrs.contractType || "STK",
     });
   }
+
+  const trades = Array.from(tradeMap.values());
 
   const posRegex = /<OpenPosition\s+([^>]*)\/>|<ComplexPosition\s+([^>]*)\/>/g;
   const posMap = new Map<string, FlexPosition>();
