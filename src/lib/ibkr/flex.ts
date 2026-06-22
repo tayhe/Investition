@@ -225,23 +225,6 @@ export function parseFlexXml(xml: string): FlexReport {
 
   const positions = Array.from(posMap.values());
 
-  const tradeCostMap = new Map<string, { totalCost: number; totalQty: number }>();
-  for (const t of trades) {
-    if (t.buySell !== "BUY") continue;
-    const existing = tradeCostMap.get(t.symbol) || { totalCost: 0, totalQty: 0 };
-    existing.totalCost += t.cost || t.amount + t.commission;
-    existing.totalQty += t.quantity;
-    tradeCostMap.set(t.symbol, existing);
-  }
-
-  for (const pos of positions) {
-    if (pos.averageCost > 0) continue;
-    const tradeData = tradeCostMap.get(pos.symbol);
-    if (tradeData && tradeData.totalQty > 0) {
-      pos.averageCost = tradeData.totalCost / tradeData.totalQty;
-    }
-  }
-
   return { trades, positions };
 }
 

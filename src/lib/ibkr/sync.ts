@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { syncIbkrFlex, parseFlexXml, type IbkrFlexConfig, type FlexReport } from "./flex";
 import { mapIbkrExchangeToMarket } from "./flex";
+import { updatePositionsWithFifo } from "./fifo";
 import { Prisma } from "@/generated/prisma/client";
 
 const { Decimal } = Prisma;
@@ -65,9 +66,20 @@ export async function syncAccountData(accountId: string, force = false): Promise
     report = result.report;
     rawXml = result.rawXml;
 
-    await db.flexCache.create({
-      data: {
+    const currentYear = new Date().getFullYear();
+    await db.flexCache.upsert({
+      where: {
+        accountId_year: { accountId, year: currentYear },
+      },
+      update: {
+        xml: rawXml,
+        tradesCount: report.trades.length,
+        positionsCount: report.positions.length,
+        createdAt: new Date(),
+      },
+      create: {
         accountId,
+        year: currentYear,
         xml: rawXml,
         tradesCount: report.trades.length,
         positionsCount: report.positions.length,
@@ -105,22 +117,24 @@ export async function syncAccountData(accountId: string, force = false): Promise
 
   const tradesCount = await upsertTrades(accountId, report);
   await upsertPositions(accountId, report);
+  await updatePositionsWithFifo(accountId);
 
   return { trades: tradesCount, positions: report.positions.length, fromCache };
 }
 
 export async function syncFromCache(accountId: string): Promise<{ trades: number; positions: number }> {
+  const currentYear = new Date().getFullYear();
   const cached = await db.flexCache.findFirst({
-    where: { accountId },
-    orderBy: { createdAt: "desc" },
+    where: { accountId, year: currentYear },
   });
 
-  if (!cached) throw new Error("无缓存数据，请先执行一次 IBKR 同步");
+  if (!cached) throw new Error("无当年缓存数据，请先执行一次 IBKR 同步");
 
   const report = parseFlexXml(cached.xml);
 
   const tradesCount = await upsertTrades(accountId, report);
   await upsertPositions(accountId, report);
+  await updatePositionsWithFifo(accountId);
 
   return { trades: tradesCount, positions: report.positions.length };
 }

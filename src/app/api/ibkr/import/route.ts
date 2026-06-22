@@ -34,9 +34,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "未找到 IBKR 账户，请先配置" }, { status: 400 });
     }
 
-    await db.flexCache.create({
-      data: {
+    const currentYear = new Date().getFullYear();
+    await db.flexCache.upsert({
+      where: {
+        accountId_year: { accountId: account.id, year: currentYear },
+      },
+      update: {
+        xml,
+        tradesCount: report.trades.length,
+        positionsCount: report.positions.length,
+        createdAt: new Date(),
+      },
+      create: {
         accountId: account.id,
+        year: currentYear,
         xml,
         tradesCount: report.trades.length,
         positionsCount: report.positions.length,

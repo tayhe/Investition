@@ -199,10 +199,12 @@ model ExchangeRate {
 model FlexCache {
   id          String   @id @default(cuid())
   accountId   String
+  year        Int      // 2025, 2026, etc.
   xml         String   @db.Text
   tradesCount Int      @default(0)
   positionsCount Int   @default(0)
   createdAt   DateTime @default(now())
 
-  @@index([accountId, createdAt])
+  @@unique([accountId, year])
+  @@index([accountId])
 }

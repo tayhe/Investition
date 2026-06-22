@@ -19,9 +19,9 @@ export async function GET() {
   }
 
   const account = accounts[0];
+  const currentYear = new Date().getFullYear();
   const lastCache = await db.flexCache.findFirst({
-    where: { accountId: account.id },
-    orderBy: { createdAt: "desc" },
+    where: { accountId: account.id, year: currentYear },
   });
 
   if (!lastCache) {
