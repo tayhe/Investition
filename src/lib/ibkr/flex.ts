@@ -118,7 +118,6 @@ export async function syncIbkrFlex(config: IbkrFlexConfig): Promise<FlexSyncResu
 
 export function parseFlexXml(xml: string): FlexReport {
   const trades: FlexTrade[] = [];
-  const positions: FlexPosition[] = [];
 
   const tradeRegex = /<Trade\s+([^>]*)\/>/g;
   let match;
@@ -149,12 +148,15 @@ export function parseFlexXml(xml: string): FlexReport {
   }
 
   const posRegex = /<OpenPosition\s+([^>]*)\/>|<ComplexPosition\s+([^>]*)\/>/g;
+  const posMap = new Map<string, FlexPosition>();
+
   while ((match = posRegex.exec(xml)) !== null) {
     const attrStr = match[1] || match[2];
     const attrs = parseXmlAttributes(attrStr);
     const quantity = parseFloat(attrs.position || attrs.quantity || "0");
     if (quantity === 0) continue;
 
+    const symbol = attrs.symbol || "";
     const marketPrice = parseFloat(
       attrs.markPrice || attrs.closePrice || attrs.marketPrice || "0"
     );
@@ -174,20 +176,35 @@ export function parseFlexXml(xml: string): FlexReport {
       attrs.fifoPnlUnrealized || attrs.unrealizedPnl || attrs.unrealizedPnL || attrs.mtmPnl || "0"
     );
 
-    positions.push({
-      conid: attrs.conid || "",
-      symbol: attrs.symbol || "",
-      description: attrs.description || "",
-      exchange: attrs.listingExchange || attrs.exchange || "",
-      quantity,
-      averageCost,
-      marketPrice,
-      marketValue,
-      currency: attrs.currency || "USD",
-      unrealizedPnl,
-      contractType: attrs.assetCategory || attrs.assetClass || attrs.contractType || "STK",
-    });
+    const existing = posMap.get(symbol);
+    if (existing) {
+      existing.quantity += quantity;
+      existing.marketValue += marketValue;
+      existing.unrealizedPnl += unrealizedPnl;
+      if (averageCost > 0) {
+        existing.averageCost = averageCost;
+      }
+      if (marketPrice > 0) {
+        existing.marketPrice = marketPrice;
+      }
+    } else {
+      posMap.set(symbol, {
+        conid: attrs.conid || "",
+        symbol,
+        description: attrs.description || "",
+        exchange: attrs.listingExchange || attrs.exchange || "",
+        quantity,
+        averageCost,
+        marketPrice,
+        marketValue,
+        currency: attrs.currency || "USD",
+        unrealizedPnl,
+        contractType: attrs.assetCategory || attrs.assetClass || attrs.contractType || "STK",
+      });
+    }
   }
+
+  const positions = Array.from(posMap.values());
 
   return { trades, positions };
 }
