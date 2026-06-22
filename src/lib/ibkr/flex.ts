@@ -149,12 +149,26 @@ export function parseFlexXml(xml: string): FlexReport {
 
   const posRegex = /<OpenPosition\s+([^>]*)\/>|<ComplexPosition\s+([^>]*)\/>/g;
   const posMap = new Map<string, FlexPosition>();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
   while ((match = posRegex.exec(xml)) !== null) {
     const attrStr = match[1] || match[2];
     const attrs = parseXmlAttributes(attrStr);
     const quantity = parseFloat(attrs.position || attrs.quantity || "0");
     if (quantity === 0) continue;
+
+    const assetCategory = (attrs.assetCategory || attrs.assetClass || attrs.contractType || "STK").toUpperCase();
+    if (assetCategory === "OPT") {
+      const expiryStr = attrs.expiry || "";
+      if (expiryStr.length >= 8) {
+        const year = parseInt(expiryStr.slice(0, 4));
+        const month = parseInt(expiryStr.slice(4, 6)) - 1;
+        const day = parseInt(expiryStr.slice(6, 8));
+        const expiry = new Date(year, month, day);
+        if (expiry < today) continue;
+      }
+    }
 
     const symbol = attrs.symbol || "";
     const marketPrice = parseFloat(
