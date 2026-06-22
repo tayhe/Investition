@@ -56,9 +56,10 @@ async function getDashboardData() {
     orderBy: { date: "asc" },
   });
 
-  const totalValue = enrichedPositions.reduce((sum, p) => sum + p.marketValue, 0);
-  const totalCost = enrichedPositions.reduce((sum, p) => sum + p.quantity * p.avgCost, 0);
-  const totalPnl = totalValue - totalCost;
+  const totalValue = enrichedPositions.reduce((sum, p) => {
+    return sum + (p.quantity > 0 ? p.marketValue : -p.marketValue);
+  }, 0);
+  const totalPnl = enrichedPositions.reduce((sum, p) => sum + p.pnl, 0);
 
   const maxDrawdown = snapshots.reduce(
     (min, s) => (s.maxDrawdown && Number(s.maxDrawdown) < min ? Number(s.maxDrawdown) : min),

@@ -52,7 +52,7 @@ async function getPortfolioData() {
   const marketMap = new Map<string, { value: number; pnl: number; currency: string }>();
   for (const pos of enriched) {
     const existing = marketMap.get(pos.market) || { value: 0, pnl: 0, currency: pos.currency };
-    existing.value += pos.marketValue;
+    existing.value += pos.quantity > 0 ? pos.marketValue : -pos.marketValue;
     existing.pnl += pos.pnl;
     marketMap.set(pos.market, existing);
   }
