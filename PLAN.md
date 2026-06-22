@@ -272,6 +272,7 @@ prisma/
 8. **Yahoo Finance 符号映射**: 外汇对加 `=X` 后缀，国际股票按交易所加 `.ST`/`.L` 等后缀
 9. **页面结构**: 路由组 `(app)/` + `login/`，Server Component 直接查询数据库
 10. **暗色模式**: CSS 变量 + `data-theme` 属性 + localStorage 持久化
+11. **IBKR Flex XML 解析**: 只取最后一个 `<FlexStatement>`（详见第九章）
 
 ---
 
@@ -279,8 +280,11 @@ prisma/
 
 1. **IBKR Flex API 限流**: 每分钟最多 10 次请求，多次失败会触发 IP 级别封锁（错误 1025），需等待 24 小时或生成新 Token
 2. **IBKR 报告系统维护**: 定期维护期间 API 不可用，需使用手动 XML 导入
-3. **Prisma v7 + adapter-pg**: import 路径是 `@/generated/prisma/client` 不是 `@prisma/client`
-4. **NextAuth v5 beta**: API 可能变动，锁定版本
-5. **Yahoo Finance 非官方 API**: 无官方限流声明，实践中 200ms 间隔 + 4 小时缓存足够安全
-6. **A 股数据**: Yahoo Finance 不直接覆盖 A 股，需通过 `.SS`/`.SZ` 后缀
-7. **密码存储**: 必须用 bcrypt 哈希，禁止明文存储
+3. **IBKR Flex XML 多 Statement 问题**: Flex Query 若配置了「年初至今 + 按日细分」，会返回 122 个 `<FlexStatement>`（每天一个），每个都包含当日的持仓和交易。**必须只取最后一个 statement**（`xml.lastIndexOf("<FlexStatement")`），否则会导致数据膨胀（24 个持仓变成 2152 个）。解析器中已通过 `xmlToParse` 变量实现。
+4. **IBKR Flex XML Tax Lot 问题**: OpenPosition 是 tax lot 级别数据，同一 symbol 有多条记录。解析器已按 symbol 聚合（数量求和）。
+5. **IBKR Flex XML 过期期权**: OpenPosition 包含已过期的期权合约。解析器已按 expiry 日期过滤。
+6. **Prisma v7 + adapter-pg**: import 路径是 `@/generated/prisma/client` 不是 `@prisma/client`
+7. **NextAuth v5 beta**: API 可能变动，锁定版本
+8. **Yahoo Finance 非官方 API**: 无官方限流声明，实践中 200ms 间隔 + 4 小时缓存足够安全
+9. **A 股数据**: Yahoo Finance 不直接覆盖 A 股，需通过 `.SS`/`.SZ` 后缀
+10. **密码存储**: 必须用 bcrypt 哈希，禁止明文存储

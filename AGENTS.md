@@ -66,6 +66,23 @@ Prisma 客户端不兼容 Edge Runtime，因此 auth 分为两个文件：
 - 错误 1025：IP 级别封锁（多次失败），需等待 24 小时或生成新 Token
 - 系统内置 15 分钟冷却期 + FlexCache 缓存自动降级
 
+### IBKR Flex XML 解析（重要教训）
+
+Flex Query 若配置了「年初至今 + 按日细分」，XML 会包含多个 `<FlexStatement>`（每天一个），每个都有完整的持仓和交易数据。**必须只取最后一个 statement**。
+
+```ts
+// 正确：只取最后一个 statement
+const lastStatementIdx = xml.lastIndexOf("<FlexStatement");
+const xmlToParse = lastStatementIdx >= 0 ? xml.slice(lastStatementIdx) : xml;
+
+// 错误：解析全部会导致数据膨胀（24 个持仓 → 2152 个）
+```
+
+其他注意事项：
+- OpenPosition 是 tax lot 级别，同一 symbol 有多条记录，需按 symbol 聚合
+- OpenPosition 包含已过期期权，需按 expiry 日期过滤
+- `costBasisPrice` 可能为 0（Flex Query 未配置成本字段时）
+
 ### Yahoo Finance 符号映射
 
 - 外汇对：`USD.CNH` → `USDCNH=X`
