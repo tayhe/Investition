@@ -103,40 +103,63 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
       const dayPositions = dailyPositions[selectedDay];
       if (!dayPositions || dayPositions.length === 0) return [];
 
-      const totalMV = dayPositions.reduce((sum, p) => sum + p.marketValue, 0);
-      return dayPositions
-        .map((p) => ({
-          symbol: p.symbol,
-          name: p.name,
-          pnl: p.marketValue,
-          contribution: totalMV !== 0 ? (p.marketValue / Math.abs(totalMV)) * 100 : 0,
-        }))
-        .sort((a, b) => b.pnl - a.pnl);
-    } else {
-      if (!selectedMonth) return positionRanking;
-      const monthDps = new Map<string, { symbol: string; name: string; value: number }>();
+      const monthStart = currentMonth + "-01";
+      let startPositions: DailyPositionEntry[] = [];
       for (const [date, dps] of Object.entries(dailyPositions)) {
-        if (!date.startsWith(selectedMonth)) continue;
-        for (const dp of dps) {
-          const existing = monthDps.get(dp.symbol);
-          if (existing) {
-            existing.value = dp.marketValue;
-          } else {
-            monthDps.set(dp.symbol, { symbol: dp.symbol, name: dp.name, value: dp.marketValue });
+        if (date.startsWith(currentMonth) && date <= selectedDay) {
+          if (!startPositions.length || date < monthStart) {
+            startPositions = dps;
+            break;
           }
         }
       }
-      const totalMV = Array.from(monthDps.values()).reduce((sum, p) => sum + p.value, 0);
-      return Array.from(monthDps.values())
-        .map((p) => ({
-          symbol: p.symbol,
-          name: p.name,
-          pnl: p.value,
-          contribution: totalMV !== 0 ? (p.value / Math.abs(totalMV)) * 100 : 0,
-        }))
+      const startMap = new Map(startPositions.map((p) => [p.symbol, p.marketValue]));
+
+      const pnlList = dayPositions
+        .map((p) => {
+          const startValue = startMap.get(p.symbol) ?? 0;
+          const pnl = p.marketValue - startValue;
+          return { symbol: p.symbol, name: p.name, pnl, contribution: 0 };
+        })
+        .filter((p) => p.pnl !== 0)
         .sort((a, b) => b.pnl - a.pnl);
+
+      const totalPnl = pnlList.reduce((sum, p) => sum + Math.abs(p.pnl), 0);
+      for (const p of pnlList) {
+        p.contribution = totalPnl !== 0 ? (p.pnl / totalPnl) * 100 : 0;
+      }
+      return pnlList;
+    } else {
+      if (!selectedMonth) return positionRanking;
+      const firstDate = Object.keys(dailyPositions)
+        .filter((d) => d.startsWith(selectedMonth))
+        .sort()[0];
+      const lastDate = Object.keys(dailyPositions)
+        .filter((d) => d.startsWith(selectedMonth))
+        .sort()
+        .pop();
+
+      if (!firstDate || !lastDate) return [];
+      const firstPositions = dailyPositions[firstDate];
+      const lastPositions = dailyPositions[lastDate];
+      const firstMap = new Map(firstPositions.map((p) => [p.symbol, p.marketValue]));
+
+      const pnlList = lastPositions
+        .map((p) => {
+          const startValue = firstMap.get(p.symbol) ?? 0;
+          const pnl = p.marketValue - startValue;
+          return { symbol: p.symbol, name: p.name, pnl, contribution: 0 };
+        })
+        .filter((p) => p.pnl !== 0)
+        .sort((a, b) => b.pnl - a.pnl);
+
+      const totalPnl = pnlList.reduce((sum, p) => sum + Math.abs(p.pnl), 0);
+      for (const p of pnlList) {
+        p.contribution = totalPnl !== 0 ? (p.pnl / totalPnl) * 100 : 0;
+      }
+      return pnlList;
     }
-  }, [view, selectedDay, selectedMonth, dailyPositions, positionRanking]);
+  }, [view, selectedDay, selectedMonth, dailyPositions, positionRanking, currentMonth]);
 
   if (snapshots.length === 0) {
     return (

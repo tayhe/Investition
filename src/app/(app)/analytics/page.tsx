@@ -3,6 +3,25 @@ import { auth } from "@/lib/auth";
 import { getLatestPrices } from "@/lib/prices/cache";
 import { AnalyticsCharts } from "./analytics-charts";
 
+async function getLatestRates(): Promise<Map<string, number>> {
+  const rates = await db.exchangeRate.findMany({ orderBy: { date: "desc" } });
+  const map = new Map<string, number>();
+  for (const r of rates) {
+    const key = `${r.baseCurrency}_${r.quoteCurrency}`;
+    if (!map.has(key)) map.set(key, Number(r.rate));
+  }
+  return map;
+}
+
+function convertToUsd(amount: number, currency: string, rates: Map<string, number>): number {
+  if (currency === "USD") return amount;
+  const direct = rates.get(`USD_${currency}`);
+  if (direct) return amount / direct;
+  const inverse = rates.get(`${currency}_USD`);
+  if (inverse) return amount * inverse;
+  return amount;
+}
+
 async function getAnalyticsData() {
   const session = await auth();
   if (!session?.user?.id) {
@@ -37,9 +56,12 @@ async function getAnalyticsData() {
   ]);
 
   const securityIds = [...new Set(positions.map((p) => p.securityId))];
-  const priceMap = await getLatestPrices(securityIds);
+  const [priceMap, rates] = await Promise.all([
+    getLatestPrices(securityIds),
+    getLatestRates(),
+  ]);
 
-  // Current position P&L ranking
+  // Current position P&L ranking (USD)
   const positionRanking = positions
     .map((pos) => {
       const price = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
@@ -48,10 +70,11 @@ async function getAnalyticsData() {
       const costBasis = qty * mult * Number(pos.avgCost);
       const marketValue = qty * mult * price;
       const pnl = marketValue - costBasis;
+      const usdPnl = convertToUsd(pnl, pos.currency, rates);
       return {
         symbol: pos.security.symbol,
         name: pos.security.name,
-        pnl,
+        pnl: usdPnl,
         contribution: 0,
       };
     })
