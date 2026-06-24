@@ -46,6 +46,7 @@
 - **Snapshot** — 每日资产快照（用于画权益曲线和计算回撤）
 - **ExchangeRate** — 汇率缓存（多币种换算用）
 - **FlexCache** — IBKR Flex XML 原始报告缓存
+- **DailyPosition** — 每日持仓明细（按日存储，用于持仓历史追踪）
 
 ---
 
@@ -89,7 +90,7 @@
 - 过滤无效标的（期权合约等）
 
 ### 4.6 汇率数据 ✅
-- USD/CNY、USD/HKD、HKD/CNY 三对汇率
+- USD/CNY、USD/HKD、HKD/CNY、USD/SEK 四对汇率
 - 4 小时缓存
 - 批量价格查询消除 N+1 问题
 
@@ -100,17 +101,6 @@
 - 每日凌晨 1 点：生成资产快照
 - 设置页手动触发按钮
 - `CRON_ENABLED=false` 可禁用
-
-### 4.11 日期时区统一 ✅
-- 新增 `lib/utils.ts` → `getToday()`，基于 `America/New_York` 时区获取"今天"
-- 所有写日期到数据库的逻辑统一使用 `getToday()`，避免服务器（UTC+8）与美股交易日错位
-- 历史价格日期提取改用 UTC 组件（Yahoo Finance 返回 UTC 午夜）
-- Snapshot 价格查询加 `date: { lte: date }` 过滤，确保只用截止快照日的价格
-- Snapshot prevSnapshot 查询加 `date: { lt: date }`，避免同日重复比较
-
-### 4.12 Snapshot 现金统一 ✅
-- Dashboard 和 Snapshot 的 `cashBalance` 统一为 0
-- 真实现金数据待 IBKR Flex API 启用 cash balance 字段后从 XML 提取
 
 ### 4.8 CSV 导入 ✅
 - 支持 Schwab 交易/持仓 CSV
@@ -128,6 +118,17 @@
 ### 4.10 页面结构 ✅
 - 路由组：`(app)/` 认证页面（有侧边栏）、`login/` 独立布局
 - 所有页面按用户隔离数据
+
+### 4.11 日期时区统一 ✅
+- 新增 `lib/utils.ts` → `getToday()`，基于 `America/New_York` 时区获取"今天"
+- 所有写日期到数据库的逻辑统一使用 `getToday()`，避免服务器（UTC+8）与美股交易日错位
+- 历史价格日期提取改用 UTC 组件（Yahoo Finance 返回 UTC 午夜）
+- Snapshot 价格查询加 `date: { lte: date }` 过滤，确保只用截止快照日的价格
+- Snapshot prevSnapshot 查询加 `date: { lt: date }`，避免同日重复比较
+
+### 4.12 Snapshot 现金统一 ✅
+- Dashboard 和 Snapshot 的 `cashBalance` 统一为 0
+- 真实现金数据待 IBKR Flex API 启用 cash balance 字段后从 XML 提取
 
 ---
 

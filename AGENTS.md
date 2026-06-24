@@ -66,6 +66,24 @@ Prisma 客户端不兼容 Edge Runtime，因此 auth 分为两个文件：
 - 错误 1025：IP 级别封锁（多次失败），需等待 24 小时或生成新 Token
 - 系统内置 15 分钟冷却期 + FlexCache 缓存自动降级
 
+### IBKR 定时同步
+
+每日 00:30 NY 时间自动执行 `syncAccountData(force=true)`，遍历所有配置了 Flex 凭据的账户，绕过冷却期强制拉取。失败时记录日志但不影响其他账户。手动按钮触发时受 15 分钟冷却期保护。
+
+### NY 时区（重要）
+
+服务器在 UTC+8（中国时间），美股交易日为 `America/New_York` 时区。所有写入数据库的日期（Price/ExchangeRate/Snapshot/DailyPosition）**必须**使用 `getToday()`（`src/lib/utils.ts`）获取"今天"。历史价格日期提取用 `getUTCFullYear()/getUTCMonth()/getUTCDate()`。
+
+```ts
+// 正确：NY 时区
+import { getToday } from "@/lib/utils";
+const today = getToday();
+
+// 错误：服务器本地时间（UTC+8 会和美股错位一天）
+const today = new Date();
+today.setHours(0, 0, 0, 0);
+```
+
 ### IBKR Flex XML 解析（重要教训）
 
 Flex Query 若配置了「年初至今 + 按日细分」，XML 会包含多个 `<FlexStatement>`（每天一个），每个都有完整的持仓和交易数据。**必须只取最后一个 statement**。
@@ -136,13 +154,14 @@ src/
 │   ├── auth.ts                   # NextAuth（Edge-safe）
 │   ├── auth-providers.ts         # NextAuth（完整）
 │   ├── scheduler.ts              # 定时任务调度器
+│   ├── utils.ts                  # 工具函数（含 getToday()）
 │   ├── prices/                   # 价格和汇率
 │   ├── csv/                      # CSV 解析
 │   └── ibkr/                     # IBKR 集成
 ├── generated/prisma/             # Prisma 自动生成（不要修改）
 └── instrumentation.ts            # 启动调度器
 prisma/
-├── schema.prisma                 # 数据库模型（10 张表）
+├── schema.prisma                 # 数据库模型（11 张表）
 ├── seed.ts                       # 种子数据脚本
 └── migrations/                   # 数据库迁移
 ```
@@ -159,11 +178,12 @@ prisma/
 
 - ✅ 数据库迁移完成，所有页面接入真实数据
 - ✅ 登录/登出 + 路由保护
-- ✅ IBKR Flex 同步（API + XML 导入 + 缓存降级）
+- ✅ IBKR Flex 同步（API + XML 导入 + 缓存降级 + 每日定时同步）
 - ✅ Yahoo Finance 价格获取（含符号映射）
-- ✅ 定时任务（价格/汇率/快照）
+- ✅ 定时任务（价格/汇率/快照/IBKR 同步）
 - ✅ CSV 导入（Schwab/IBKR/通用）
 - ✅ 暗色模式 + 账户管理
+- ✅ NY 时区统一（getToday()）
 - ❌ 无注册页面
 - ❌ 无 Schwab API 集成
 
