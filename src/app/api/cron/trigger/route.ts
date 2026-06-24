@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { fetchPrices } from "@/lib/prices/fetcher";
 import { fetchExchangeRates } from "@/lib/prices/exchange-rate";
 import { createDailySnapshot } from "@/lib/ibkr/sync";
+import { getToday } from "@/lib/utils";
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -32,8 +33,7 @@ export async function POST(request: NextRequest) {
           where: { userId: session.user.id },
           select: { id: true },
         });
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        const today = getToday();
         for (const account of accounts) {
           await createDailySnapshot(account.id, today);
         }

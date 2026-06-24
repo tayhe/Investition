@@ -1,3 +1,5 @@
+import { getToday } from "@/lib/utils";
+
 const IBKR_FLEX_BASE = "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService";
 
 export interface IbkrFlexConfig {
@@ -169,8 +171,7 @@ export function parseFlexXml(xml: string): FlexReport {
 
   const posRegex = /<OpenPosition\s+([^>]*)\/>|<ComplexPosition\s+([^>]*)\/>/g;
   const posMap = new Map<string, FlexPosition>();
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = getToday();
 
   while ((match = posRegex.exec(lastXml)) !== null) {
     const attrStr = match[1] || match[2];

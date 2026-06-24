@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { syncAccountData, syncFromCache, createDailySnapshot } from "@/lib/ibkr/sync";
+import { getToday } from "@/lib/utils";
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -23,7 +24,7 @@ export async function POST(request: NextRequest) {
       result = await syncAccountData(accountId, force === true);
     }
 
-    await createDailySnapshot(accountId, new Date());
+    await createDailySnapshot(accountId, getToday());
 
     return NextResponse.json({ success: true, ...result });
   } catch (error) {

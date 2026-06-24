@@ -1,5 +1,6 @@
 import YahooFinance from "yahoo-finance2";
 import { db } from "@/lib/db";
+import { getToday } from "@/lib/utils";
 
 const yahooFinance = new YahooFinance();
 
@@ -16,8 +17,7 @@ const PAIRS: [string, string][] = [
 ];
 
 export async function fetchExchangeRates() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = getToday();
   const results = { updated: 0, skipped: 0, errors: [] as string[] };
 
   for (const [base, quote] of PAIRS) {

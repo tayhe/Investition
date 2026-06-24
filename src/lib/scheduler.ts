@@ -2,7 +2,8 @@ import cron from "node-cron";
 import { db } from "@/lib/db";
 import { fetchPrices } from "@/lib/prices/fetcher";
 import { fetchExchangeRates } from "@/lib/prices/exchange-rate";
-import { createDailySnapshot } from "@/lib/ibkr/sync";
+import { createDailySnapshot, syncAccountData } from "@/lib/ibkr/sync";
+import { getToday } from "@/lib/utils";
 
 let started = false;
 
@@ -33,12 +34,32 @@ async function runExchangeRateUpdate() {
   }
 }
 
+async function runIbkrSync() {
+  try {
+    log("Starting IBKR Flex sync...");
+    const accounts = await db.account.findMany({
+      where: { ibkrFlexToken: { not: null }, ibkrFlexQueryId: { not: null } },
+      select: { id: true, name: true },
+    });
+
+    for (const account of accounts) {
+      try {
+        const result = await syncAccountData(account.id, true);
+        log(`IBKR sync done for ${account.name}: ${result.trades} trades, ${result.positions} positions${result.fromCache ? " (from cache)" : ""}`);
+      } catch (err) {
+        log(`IBKR sync failed for ${account.name}: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+  } catch (err) {
+    log(`IBKR sync failed: ${err instanceof Error ? err.message : err}`);
+  }
+}
+
 async function runDailySnapshot() {
   try {
     log("Starting daily snapshot...");
     const accounts = await db.account.findMany({ select: { id: true } });
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = getToday();
 
     for (const account of accounts) {
       await createDailySnapshot(account.id, today);
@@ -66,6 +87,9 @@ export function startScheduler() {
 
   cron.schedule("0 */4 * * *", runExchangeRateUpdate, { timezone: "America/New_York" });
   log("Scheduled: exchange rate update every 4 hours");
+
+  cron.schedule("30 0 * * *", runIbkrSync, { timezone: "America/New_York" });
+  log("Scheduled: IBKR Flex sync daily at 00:30 NYSE time");
 
   cron.schedule("0 1 * * *", runDailySnapshot, { timezone: "America/New_York" });
   log("Scheduled: daily snapshot at 01:00 NYSE time");

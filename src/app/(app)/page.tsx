@@ -33,7 +33,7 @@ async function getDashboardData() {
   const securityIds = [...new Set(positions.map((p) => p.securityId))];
   const priceMap = await getLatestPrices(securityIds);
 
-  const cashBalance = 5000;
+  const cashBalance = 0;
 
   const positionsValue = positions.reduce((sum, pos) => {
     const price = priceMap.get(pos.securityId) ?? Number(pos.avgCost);

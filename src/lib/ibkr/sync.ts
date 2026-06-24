@@ -150,8 +150,8 @@ async function storeDailyPositions(accountId: string, xml: string) {
     });
     if (!security) continue;
 
-    const date = new Date(dp.date);
-    date.setHours(0, 0, 0, 0);
+    const parts = dp.date.split("-");
+    const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
 
     await db.dailyPosition.upsert({
       where: {
@@ -352,7 +352,7 @@ export async function createDailySnapshot(accountId: string, date: Date) {
   let positionsValue = new Decimal(0);
   for (const pos of positions) {
     const latestPrice = await db.price.findFirst({
-      where: { securityId: pos.securityId },
+      where: { securityId: pos.securityId, date: { lte: date } },
       orderBy: { date: "desc" },
     });
 
@@ -365,7 +365,7 @@ export async function createDailySnapshot(accountId: string, date: Date) {
   const totalValue = positionsValue.add(cashBalance);
 
   const prevSnapshot = await db.snapshot.findFirst({
-    where: { accountId },
+    where: { accountId, date: { lt: date } },
     orderBy: { date: "desc" },
   });
 

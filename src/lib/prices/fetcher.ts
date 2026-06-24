@@ -1,5 +1,6 @@
 import YahooFinance from "yahoo-finance2";
 import { db } from "@/lib/db";
+import { getToday } from "@/lib/utils";
 
 const yahooFinance = new YahooFinance();
 
@@ -63,8 +64,7 @@ export async function fetchPrices() {
   const securities = await db.security.findMany();
   if (securities.length === 0) return { updated: 0, skipped: 0, errors: [] };
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = getToday();
 
   const results = { updated: 0, skipped: 0, errors: [] as string[] };
 
@@ -144,8 +144,8 @@ export async function fetchHistoricalPrices(days = 30) {
       }) as Array<{ date: Date; close: number; open?: number; high?: number; low?: number; volume?: number }>;
 
       for (const bar of history) {
-        const date = new Date(bar.date);
-        date.setHours(0, 0, 0, 0);
+        const barDate = new Date(bar.date);
+        const date = new Date(barDate.getUTCFullYear(), barDate.getUTCMonth(), barDate.getUTCDate());
 
         await db.price.upsert({
           where: { securityId_date: { securityId: sec.id, date } },

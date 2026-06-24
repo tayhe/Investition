@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { parseFlexXml } from "@/lib/ibkr/flex";
 import { upsertTrades, upsertPositions, createDailySnapshot } from "@/lib/ibkr/sync";
+import { getToday } from "@/lib/utils";
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest) {
 
     const tradesCount = await upsertTrades(account.id, report);
     await upsertPositions(account.id, report);
-    await createDailySnapshot(account.id, new Date());
+    await createDailySnapshot(account.id, getToday());
 
     return NextResponse.json({
       success: true,
