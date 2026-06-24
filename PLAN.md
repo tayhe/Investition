@@ -1,7 +1,7 @@
 # Investition — 项目计划与开发路线图
 
 > 本文档供服务器端 MiMo Code Agent 接手后续开发和部署使用。
-> 最后更新: 2026-06-21
+> 最后更新: 2026-06-24
 
 ---
 
@@ -95,10 +95,22 @@
 
 ### 4.7 定时任务 ✅
 - node-cron 调度器，通过 Next.js instrumentation 启动
-- 每 4 小时：更新价格和汇率（纽约时间）
+- 每 4 小时：更新价格和汇率（`America/New_York` 时区）
+- 每日 00:30：IBKR Flex 数据同步（`syncAccountData(force=true)`，绕过冷却期）
 - 每日凌晨 1 点：生成资产快照
 - 设置页手动触发按钮
 - `CRON_ENABLED=false` 可禁用
+
+### 4.11 日期时区统一 ✅
+- 新增 `lib/utils.ts` → `getToday()`，基于 `America/New_York` 时区获取"今天"
+- 所有写日期到数据库的逻辑统一使用 `getToday()`，避免服务器（UTC+8）与美股交易日错位
+- 历史价格日期提取改用 UTC 组件（Yahoo Finance 返回 UTC 午夜）
+- Snapshot 价格查询加 `date: { lte: date }` 过滤，确保只用截止快照日的价格
+- Snapshot prevSnapshot 查询加 `date: { lt: date }`，避免同日重复比较
+
+### 4.12 Snapshot 现金统一 ✅
+- Dashboard 和 Snapshot 的 `cashBalance` 统一为 0
+- 真实现金数据待 IBKR Flex API 启用 cash balance 字段后从 XML 提取
 
 ### 4.8 CSV 导入 ✅
 - 支持 Schwab 交易/持仓 CSV
@@ -279,6 +291,11 @@ prisma/
 15. **交易去重**: 按 `ibOrderID + side + quantity + price` 去重，避免多 statement 重复
 16. **FlexCache 分年存储**: `accountId + year` 唯一约束，年份从 XML `fromDate` 提取
 17. **Prisma Decimal 序列化**: Server Component 中 `Number(Decimal)` 失效，改用 `type === "OPTION" ? 100 : 1`
+18. **日期基准时区**: 所有写入数据库的日期（Price/ExchangeRate/Snapshot/DailyPosition）必须基于 `America/New_York` 时区，使用 `getToday()` 获取。服务器在 UTC+8，若用本地时间会导致美股 6/24 的数据被记录为 6/24，但实际是 6/23 收盘价，跨时区错位
+19. **历史价格日期提取**: Yahoo Finance historical API 返回 `date` 字段为 UTC 午夜，提取日期用 `getUTCFullYear()/getUTCMonth()/getUTCDate()`，不能直接 `setHours(0,0,0,0)`（会按本地时区退后一天）
+20. **Snapshot 价格截止日**: `createDailySnapshot` 中 Price 查询必须加 `date: { lte: date }`，否则会用未来日期的价格，导致历史 snapshot 值错误
+21. **prevSnapshot 严格小于当前日**: 必须 `date: { lt: date }` 而非任意 `date desc`，否则同日重复生成 snapshot 时会与自己比较，dailyPnl = 0
+22. **IBKR 定时同步策略**: 每日 00:30 NY 时间强制拉取一次（`force=true` 绕过 15 分钟冷却期），其他时间通过手动按钮触发并受冷却期保护
 
 ---
 
@@ -299,3 +316,5 @@ prisma/
 13. **A 股数据**: Yahoo Finance 不直接覆盖 A 股，需通过 `.SS`/`.SZ` 后缀。符号已含后缀时不要重复添加
 14. **密码存储**: 必须用 bcrypt 哈希，禁止明文存储
 15. **期权乘数**: 美股期权 1 手 = 100 股，市值 = quantity × 100 × optionPrice
+16. **跨时区日期错位**: 服务器在 UTC+8（中国时间），美股交易日为 `America/New_York` 时区。所有日期写入数据库时必须用 `getToday()`（基于 NY 时区），否则 6/24 凌晨跑价格更新时，Price 表日期会标为 6/24 但实际抓取的是 6/23 收盘价，导致 Price/Snapshot/DailyPosition 日期不一致，dailyPnl 偏差
+17. **MiMoCode subagent 模型**: 配置文件 `~/.config/mimocode/mimocode.json` 中 subagent 的 `model` 字段必须使用 `mimo models` 列表中存在的完整 provider 前缀。`minimax-cn/MiniMax-M3` 不可用，正确写法是 `minimax-cn-coding-plan/MiniMax-M3`（漏写 `-coding-plan` 会触发 ProviderModelNotFoundError）
