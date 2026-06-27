@@ -46,10 +46,6 @@ function toYahooSymbol(ibkrSymbol: string, exchange: string): string | null {
   return ibkrSymbol;
 }
 
-function isValidYahooSymbol(symbol: string): boolean {
-  return symbol !== null;
-}
-
 async function needsPriceUpdate(securityId: string): Promise<boolean> {
   const cutoff = new Date();
   cutoff.setHours(cutoff.getHours() - PRICE_CACHE_HOURS);

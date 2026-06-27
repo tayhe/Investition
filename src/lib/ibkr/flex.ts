@@ -263,7 +263,7 @@ export function mapIbkrExchangeToMarket(exchange: string): "US" | "HK" | "A" {
   return "US";
 }
 
-export function normalizeSymbol(flexSymbol: string, exchange: string): string {
+export function normalizeSymbol(flexSymbol: string, _exchange: string): string {
   return flexSymbol;
 }
 

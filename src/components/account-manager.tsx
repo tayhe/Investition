@@ -49,6 +49,7 @@ export function AccountManager() {
   }, [initialized]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchAccounts();
   }, [fetchAccounts]);
 

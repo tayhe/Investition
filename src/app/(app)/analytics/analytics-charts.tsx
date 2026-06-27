@@ -270,7 +270,7 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
             <h2 className="text-lg font-semibold mb-4">每日收益率</h2>
             {dailyChartData.length > 0 ? (
               <ResponsiveContainer width="100%" height={250}>
-                <BarChart data={dailyChartData} onClick={(e: any) => {
+                <BarChart data={dailyChartData} onClick={(e: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
                   if (e?.activeLabel) {
                     const clicked = dailyChartData.find((d) => d.date === e.activeLabel);
                     if (clicked) {
@@ -345,7 +345,7 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
               <h2 className="text-lg font-semibold mb-4">月度收益率</h2>
               {monthlyChartData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={250}>
-                  <BarChart data={monthlyChartData} onClick={(e: any) => {
+                  <BarChart data={monthlyChartData} onClick={(e: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
                     if (e?.activeLabel) {
                       const clicked = monthlyChartData.find((d) => d.month === e.activeLabel);
                       if (clicked) {

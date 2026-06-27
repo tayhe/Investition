@@ -20,14 +20,14 @@ function applyTheme(theme: Theme) {
 }
 
 export function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>("system");
+  const [theme, setTheme] = useState<Theme>(() => {
+    if (typeof window === "undefined") return "system";
+    return (localStorage.getItem("theme") as Theme) || "system";
+  });
 
   useEffect(() => {
-    const saved = localStorage.getItem("theme") as Theme | null;
-    const initial = saved || "system";
-    setTheme(initial);
-    applyTheme(initial);
-  }, []);
+    applyTheme(theme);
+  }, [theme]);
 
   const toggle = () => {
     const current = theme === "system" ? getSystemTheme() : theme;
