@@ -36,12 +36,10 @@ async function getAnalyticsData() {
   }
 
   const accountIds = accounts.map((a) => a.id);
-  const now = new Date();
-  const yearStart = new Date(now.getFullYear(), 0, 1);
 
   const [snapshots, positions, dailyPositions] = await Promise.all([
     db.snapshot.findMany({
-      where: { accountId: { in: accountIds }, date: { gte: yearStart } },
+      where: { accountId: { in: accountIds } },
       orderBy: { date: "asc" },
     }),
     db.position.findMany({
@@ -49,7 +47,7 @@ async function getAnalyticsData() {
       include: { security: true },
     }),
     db.dailyPosition.findMany({
-      where: { accountId: { in: accountIds }, date: { gte: yearStart } },
+      where: { accountId: { in: accountIds } },
       include: { security: true },
       orderBy: { date: "asc" },
     }),

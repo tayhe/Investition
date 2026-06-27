@@ -61,9 +61,22 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
 
   const now = new Date();
   const currentMonth = now.toISOString().slice(0, 7);
+  const currentYear = now.getFullYear();
 
-  // Month view data
-  const monthSnapshots = snapshots.filter((s) => s.date.startsWith(currentMonth));
+  const availableMonths = useMemo(() => {
+    const set = new Set(snapshots.map((s) => s.date.slice(0, 7)));
+    return Array.from(set).sort();
+  }, [snapshots]);
+
+  const availableYears = useMemo(() => {
+    const set = new Set(monthlyData.map((m) => m.month.slice(0, 4)));
+    return Array.from(set).map(Number).sort();
+  }, [monthlyData]);
+
+  const [viewMonth, setViewMonth] = useState(currentMonth);
+  const [viewYear, setViewYear] = useState(currentYear);
+
+  const monthSnapshots = snapshots.filter((s) => s.date.startsWith(viewMonth));
   const monthStart = monthSnapshots.length > 0 ? monthSnapshots[0].value : 0;
   const monthEnd = monthSnapshots.length > 0 ? monthSnapshots[monthSnapshots.length - 1].value : 0;
   const monthPnl = monthEnd - monthStart;
@@ -80,17 +93,18 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
     pnl: s.dailyPnl ?? 0,
   }));
 
-  // Year view data
-  const yearStart = snapshots.length > 0 ? snapshots[0].value : 0;
-  const yearEnd = snapshots.length > 0 ? snapshots[snapshots.length - 1].value : 0;
+  const yearSnapshots = snapshots.filter((s) => s.date.startsWith(String(viewYear)));
+  const yearStart = yearSnapshots.length > 0 ? yearSnapshots[0].value : 0;
+  const yearEnd = yearSnapshots.length > 0 ? yearSnapshots[yearSnapshots.length - 1].value : 0;
   const yearPnl = yearEnd - yearStart;
   const yearReturn = yearStart > 0 ? (yearPnl / yearStart) * 100 : 0;
-  const yearMaxDD = snapshots.reduce(
+  const yearMaxDD = yearSnapshots.reduce(
     (min, s) => (s.maxDrawdown !== null && s.maxDrawdown < min ? s.maxDrawdown : min),
     0
   );
 
-  const monthlyChartData = monthlyData.map((m) => ({
+  const filteredMonthlyData = monthlyData.filter((m) => m.month.startsWith(String(viewYear)));
+  const monthlyChartData = filteredMonthlyData.map((m) => ({
     month: m.shortLabel,
     fullMonth: m.month,
     returnRate: Number(m.returnRate.toFixed(2)),
@@ -103,10 +117,10 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
       const dayPositions = dailyPositions[selectedDay];
       if (!dayPositions || dayPositions.length === 0) return [];
 
-      const monthStart = currentMonth + "-01";
+      const monthStart = viewMonth + "-01";
       let startPositions: DailyPositionEntry[] = [];
       for (const [date, dps] of Object.entries(dailyPositions)) {
-        if (date.startsWith(currentMonth) && date <= selectedDay) {
+        if (date.startsWith(viewMonth) && date <= selectedDay) {
           if (!startPositions.length || date < monthStart) {
             startPositions = dps;
             break;
@@ -159,7 +173,7 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
       }
       return pnlList;
     }
-  }, [view, selectedDay, selectedMonth, dailyPositions, positionRanking, currentMonth]);
+  }, [view, selectedDay, selectedMonth, dailyPositions, positionRanking, viewMonth]);
 
   if (snapshots.length === 0) {
     return (
@@ -171,7 +185,7 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
 
   return (
     <>
-      <div className="flex gap-2 mb-6">
+      <div className="flex items-center gap-2 mb-6">
         <button
           onClick={() => { setView("month"); setSelectedDay(null); setSelectedMonth(null); }}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${view === "month" ? "bg-primary text-primary-foreground" : "border border-default text-muted hover:text-foreground"}`}
@@ -184,22 +198,72 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
         >
           年
         </button>
+
+        {view === "month" ? (
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => {
+                const idx = availableMonths.indexOf(viewMonth);
+                if (idx > 0) { setViewMonth(availableMonths[idx - 1]); setSelectedDay(null); }
+              }}
+              disabled={availableMonths.indexOf(viewMonth) <= 0}
+              className="px-2 py-1 rounded border border-default text-sm text-muted hover:text-foreground disabled:opacity-30"
+            >
+              ←
+            </button>
+            <span className="text-sm font-medium min-w-[80px] text-center">{viewMonth}</span>
+            <button
+              onClick={() => {
+                const idx = availableMonths.indexOf(viewMonth);
+                if (idx < availableMonths.length - 1) { setViewMonth(availableMonths[idx + 1]); setSelectedDay(null); }
+              }}
+              disabled={availableMonths.indexOf(viewMonth) >= availableMonths.length - 1}
+              className="px-2 py-1 rounded border border-default text-sm text-muted hover:text-foreground disabled:opacity-30"
+            >
+              →
+            </button>
+          </div>
+        ) : (
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => {
+                const idx = availableYears.indexOf(viewYear);
+                if (idx > 0) { setViewYear(availableYears[idx - 1]); setSelectedMonth(null); }
+              }}
+              disabled={availableYears.indexOf(viewYear) <= 0}
+              className="px-2 py-1 rounded border border-default text-sm text-muted hover:text-foreground disabled:opacity-30"
+            >
+              ←
+            </button>
+            <span className="text-sm font-medium min-w-[50px] text-center">{viewYear}年</span>
+            <button
+              onClick={() => {
+                const idx = availableYears.indexOf(viewYear);
+                if (idx < availableYears.length - 1) { setViewYear(availableYears[idx + 1]); setSelectedMonth(null); }
+              }}
+              disabled={availableYears.indexOf(viewYear) >= availableYears.length - 1}
+              className="px-2 py-1 rounded border border-default text-sm text-muted hover:text-foreground disabled:opacity-30"
+            >
+              →
+            </button>
+          </div>
+        )}
       </div>
 
       {view === "month" ? (
         <>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <StatCard
-              title="本月收益"
+              title={`${viewMonth} 收益`}
               value={`${monthReturn >= 0 ? "+" : ""}${monthReturn.toFixed(2)}%`}
               changePositive={monthReturn >= 0}
             />
             <StatCard
-              title="本月盈亏"
+              title={`${viewMonth} 盈亏`}
               value={`$${monthPnl.toFixed(0)}`}
               changePositive={monthPnl >= 0}
             />
-            <StatCard title="本月最大回撤" value={`${monthMaxDD.toFixed(2)}%`} />
+            <StatCard title={`${viewMonth} 最大回撤`} value={`${monthMaxDD.toFixed(2)}%`} />
           </div>
 
           <div className="bg-card border border-default rounded-xl p-6">
@@ -264,16 +328,16 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
         <>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <StatCard
-              title="本年收益"
+              title={`${viewYear}年收益`}
               value={`${yearReturn >= 0 ? "+" : ""}${yearReturn.toFixed(2)}%`}
               changePositive={yearReturn >= 0}
             />
             <StatCard
-              title="本年盈亏"
+              title={`${viewYear}年盈亏`}
               value={`$${yearPnl.toFixed(0)}`}
               changePositive={yearPnl >= 0}
             />
-            <StatCard title="本年最大回撤" value={`${yearMaxDD.toFixed(2)}%`} />
+            <StatCard title={`${viewYear}年最大回撤`} value={`${yearMaxDD.toFixed(2)}%`} />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -330,7 +394,7 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
 
           <div className="bg-card border border-default rounded-xl p-6">
             <h2 className="text-lg font-semibold mb-4">月度收益明细</h2>
-            <MonthlyDetailTable data={monthlyData} />
+            <MonthlyDetailTable data={filteredMonthlyData} />
           </div>
         </>
       )}
