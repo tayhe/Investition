@@ -3,7 +3,8 @@ FROM node:20-alpine AS base
 FROM base AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --only=production && npm cache clean --force
+# devDependencies needed for `next build` (postcss/tailwindcss/typescript).
+RUN npm ci && npm cache clean --force
 
 FROM base AS builder
 WORKDIR /app
@@ -21,6 +22,8 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
+# Copy only the runtime deps (no devDeps) into the runner image.
+COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static

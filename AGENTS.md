@@ -197,6 +197,10 @@ docker compose exec app npx prisma migrate deploy
 docker compose exec app npx prisma db seed  # 可选
 ```
 
+### 开机自启
+
+依赖 docker-compose.yml 里的 `restart: unless-stopped`。服务器重启时 Docker daemon 会自动拉起之前在跑的容器。**不需要 systemd unit**——之前实验过 systemd 方案，但属于过度设计（覆盖的场景几乎不会发生，且每次重启都跑额外的 reconcile）。如果未来需要"无论容器之前什么状态，开机都建起来"的强保证，备用方案在 `~/Documents/server-config/docker/README.md` 末尾。
+
 ## 禁止事项
 
 - 不要修改 `src/generated/prisma/`（Prisma 自动生成）
