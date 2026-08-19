@@ -205,7 +205,7 @@ export function parseFlexXml(xml: string): FlexReport {
     if (averageCost === 0) {
       const costBasisMoney = parseFloat(attrs.costBasisMoney || "0");
       if (costBasisMoney !== 0 && quantity !== 0) {
-        averageCost = costBasisMoney / Math.abs(quantity);
+        averageCost = Math.abs(costBasisMoney / (quantity * multiplier));
       }
     }
     const unrealizedPnl = parseFloat(
@@ -214,10 +214,16 @@ export function parseFlexXml(xml: string): FlexReport {
 
     const existing = posMap.get(symbol);
     if (existing) {
-      existing.quantity += quantity;
+      const prevTotalCost = existing.quantity * existing.multiplier * existing.averageCost;
+      const newTotalCost = quantity * multiplier * averageCost;
+      const totalQty = existing.quantity + quantity;
+
+      existing.quantity = totalQty;
       existing.marketValue += marketValue;
       existing.unrealizedPnl += unrealizedPnl;
-      if (averageCost > 0) {
+      if (totalQty !== 0 && (prevTotalCost + newTotalCost) !== 0) {
+        existing.averageCost = Math.abs((prevTotalCost + newTotalCost) / (totalQty * multiplier));
+      } else if (averageCost > 0) {
         existing.averageCost = averageCost;
       }
       if (marketPrice > 0) {
@@ -263,7 +269,7 @@ export function mapIbkrExchangeToMarket(exchange: string): "US" | "HK" | "A" {
   return "US";
 }
 
-export function normalizeSymbol(flexSymbol: string, _exchange: string): string {
+export function normalizeSymbol(flexSymbol: string): string {
   return flexSymbol;
 }
 
@@ -280,7 +286,7 @@ export interface DailyPositionData {
 }
 
 export function parseAllDailyPositions(xml: string): DailyPositionData[] {
-  const results: DailyPositionData[] = [];
+  const dailyMap = new Map<string, DailyPositionData>();
   const statementRegex = /<FlexStatement[^>]*fromDate="(\d{4})(\d{2})(\d{2})"[^>]*>/g;
   let stmtMatch;
 
@@ -305,26 +311,36 @@ export function parseAllDailyPositions(xml: string): DailyPositionData[] {
           const expYear = parseInt(expiryStr.slice(0, 4));
           const expMonth = parseInt(expiryStr.slice(4, 6)) - 1;
           const expDay = parseInt(expiryStr.slice(6, 8));
-          if (new Date(expYear, expMonth, expDay) < new Date(stmtDate)) continue;
+          if (new Date(Date.UTC(expYear, expMonth, expDay)) < new Date(stmtDate)) continue;
         }
       }
 
+      const symbol = attrs.symbol || "";
+      const exchange = attrs.listingExchange || attrs.exchange || "";
       const marketPrice = parseFloat(attrs.markPrice || attrs.closePrice || attrs.marketPrice || "0");
       const marketValue = parseFloat(attrs.positionValue || attrs.value || attrs.marketValue || "0");
+      const key = `${stmtDate}_${symbol}_${exchange}`;
 
-      results.push({
-        date: stmtDate,
-        symbol: attrs.symbol || "",
-        conid: attrs.conid || "",
-        exchange: attrs.listingExchange || attrs.exchange || "",
-        quantity,
-        marketPrice,
-        marketValue,
-        currency: attrs.currency || "USD",
-        contractType: assetCategory,
-      });
+      const existing = dailyMap.get(key);
+      if (existing) {
+        existing.quantity += quantity;
+        existing.marketValue += marketValue;
+        if (marketPrice > 0) existing.marketPrice = marketPrice;
+      } else {
+        dailyMap.set(key, {
+          date: stmtDate,
+          symbol,
+          conid: attrs.conid || "",
+          exchange,
+          quantity,
+          marketPrice,
+          marketValue,
+          currency: attrs.currency || "USD",
+          contractType: assetCategory,
+        });
+      }
     }
   }
 
-  return results;
+  return Array.from(dailyMap.values());
 }

@@ -13,12 +13,17 @@ async function getLatestRates(): Promise<Map<string, number>> {
   return map;
 }
 
-function convertToUsd(amount: number, currency: string, rates: Map<string, number>): number {
-  if (currency === "USD") return amount;
-  const direct = rates.get(`USD_${currency}`);
-  if (direct) return amount / direct;
-  const inverse = rates.get(`${currency}_USD`);
-  if (inverse) return amount * inverse;
+function convertCurrency(amount: number, from: string, to: string, rates: Map<string, number>): number {
+  if (from === to) return amount;
+  const direct = rates.get(`${from}_${to}`);
+  if (direct) return amount * direct;
+  const inverse = rates.get(`${to}_${from}`);
+  if (inverse && inverse > 0) return amount / inverse;
+  const fromToUsd = from === "USD" ? 1 : (rates.get(`${from}_USD`) ?? (rates.get(`USD_${from}`) ? 1 / rates.get(`USD_${from}`)! : null));
+  const toToUsd = to === "USD" ? 1 : (rates.get(`${to}_USD`) ?? (rates.get(`USD_${to}`) ? 1 / rates.get(`USD_${to}`)! : null));
+  if (fromToUsd !== null && toToUsd !== null && toToUsd > 0) {
+    return (amount * fromToUsd) / toToUsd;
+  }
   return amount;
 }
 
@@ -36,8 +41,9 @@ async function getAnalyticsData() {
   }
 
   const accountIds = accounts.map((a) => a.id);
+  const baseCurrency = accounts[0].currency || "USD";
 
-  const [snapshots, positions, dailyPositions] = await Promise.all([
+  const [snapshots, positions, dailyPositions, rates] = await Promise.all([
     db.snapshot.findMany({
       where: { accountId: { in: accountIds } },
       orderBy: { date: "asc" },
@@ -51,24 +57,22 @@ async function getAnalyticsData() {
       include: { security: true },
       orderBy: { date: "asc" },
     }),
+    getLatestRates(),
   ]);
 
   const securityIds = [...new Set(positions.map((p) => p.securityId))];
-  const [priceMap, rates] = await Promise.all([
-    getLatestPrices(securityIds),
-    getLatestRates(),
-  ]);
+  const priceMap = await getLatestPrices(securityIds);
 
   // Current position P&L ranking (USD)
   const positionRanking = positions
     .map((pos) => {
       const price = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
-      const mult = pos.security.type === "OPTION" ? 100 : 1;
+      const mult = pos.security.type === "OPTION" ? 100 : Number(pos.security.multiplier || 1);
       const qty = Number(pos.quantity);
       const costBasis = qty * mult * Number(pos.avgCost);
       const marketValue = qty * mult * price;
       const pnl = marketValue - costBasis;
-      const usdPnl = convertToUsd(pnl, pos.currency, rates);
+      const usdPnl = convertCurrency(pnl, pos.currency, "USD", rates);
       return {
         symbol: pos.security.symbol,
         name: pos.security.name,
@@ -78,21 +82,61 @@ async function getAnalyticsData() {
     })
     .sort((a, b) => b.pnl - a.pnl);
 
-  const totalPnl = positionRanking.reduce((sum, p) => sum + p.pnl, 0);
+  const totalAbsPnl = positionRanking.reduce((sum, p) => sum + Math.abs(p.pnl), 0);
   for (const p of positionRanking) {
-    p.contribution = totalPnl !== 0 ? (p.pnl / Math.abs(totalPnl)) * 100 : 0;
+    p.contribution = totalAbsPnl > 0 ? (p.pnl / totalAbsPnl) * 100 : 0;
   }
 
-  // Monthly data from snapshots
-  const monthlyMap = new Map<string, { startValue: number; endValue: number; pnl: number }>();
+  // Combine multi-account snapshots by date
+  const accountCurrencyMap = new Map(accounts.map((a) => [a.id, a.currency]));
+  const dateMap = new Map<string, { totalValue: number; dailyPnl: number }>();
+
   for (const s of snapshots) {
-    const month = s.date.toISOString().slice(0, 7);
-    const val = Number(s.totalValue);
-    const existing = monthlyMap.get(month) || { startValue: val, endValue: val, pnl: 0 };
+    const dateKey = s.date.toISOString().split("T")[0];
+    const accCurrency = s.currency || accountCurrencyMap.get(s.accountId) || baseCurrency;
+    const val = convertCurrency(Number(s.totalValue), accCurrency, baseCurrency, rates);
+    const pnl = s.dailyPnl ? convertCurrency(Number(s.dailyPnl), accCurrency, baseCurrency, rates) : 0;
+
+    const existing = dateMap.get(dateKey) || { totalValue: 0, dailyPnl: 0 };
+    existing.totalValue += val;
+    existing.dailyPnl += pnl;
+    dateMap.set(dateKey, existing);
+  }
+
+  const sortedDates = Array.from(dateMap.keys()).sort();
+  let peak = 0;
+  let runningMaxDrawdown = 0;
+  const combinedSnapshots = sortedDates.map((dateStr, idx) => {
+    const data = dateMap.get(dateStr)!;
+    const prevVal = idx > 0 ? dateMap.get(sortedDates[idx - 1])!.totalValue : data.totalValue - data.dailyPnl;
+    const dailyReturn = prevVal > 0 ? (data.dailyPnl / prevVal) * 100 : 0;
+
+    if (data.totalValue > peak) peak = data.totalValue;
+    if (peak > 0) {
+      const dd = ((peak - data.totalValue) / peak) * 100;
+      if (dd > runningMaxDrawdown) runningMaxDrawdown = dd;
+    }
+
+    return {
+      date: dateStr,
+      value: data.totalValue,
+      dailyReturn,
+      dailyPnl: data.dailyPnl,
+      maxDrawdown: runningMaxDrawdown,
+    };
+  });
+
+  // Monthly data from combined snapshots
+  const monthlyMap = new Map<string, { startValue: number; endValue: number; pnl: number }>();
+  for (const s of combinedSnapshots) {
+    const month = s.date.slice(0, 7);
+    const val = s.value;
+    const existing = monthlyMap.get(month) || { startValue: val - (s.dailyPnl ?? 0), endValue: val, pnl: 0 };
     existing.endValue = val;
-    existing.pnl += s.dailyPnl ? Number(s.dailyPnl) : 0;
+    existing.pnl += s.dailyPnl ?? 0;
     monthlyMap.set(month, existing);
   }
+
   const monthlyData = Array.from(monthlyMap.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([month, data]) => ({
@@ -105,35 +149,38 @@ async function getAnalyticsData() {
       returnRate: data.startValue > 0 ? ((data.endValue - data.startValue) / data.startValue) * 100 : 0,
     }));
 
-  // Daily position data grouped by date
-  const dailyPositionMap = new Map<string, typeof dailyPositions>();
+  // Daily position data grouped by date (merged across accounts if same symbol)
+  const dailyPositionMap = new Map<string, Map<string, { symbol: string; name: string; quantity: number; marketValue: number; marketPrice: number; currency: string }>>();
   for (const dp of dailyPositions) {
-    const dateKey = dp.date.toISOString().slice(0, 10);
-    if (!dailyPositionMap.has(dateKey)) dailyPositionMap.set(dateKey, []);
-    dailyPositionMap.get(dateKey)!.push(dp);
+    const dateKey = dp.date.toISOString().split("T")[0];
+    if (!dailyPositionMap.has(dateKey)) dailyPositionMap.set(dateKey, new Map());
+    const datePositions = dailyPositionMap.get(dateKey)!;
+
+    const sym = dp.security.symbol;
+    const existing = datePositions.get(sym);
+    if (existing) {
+      existing.quantity += Number(dp.quantity);
+      existing.marketValue += Number(dp.marketValue);
+    } else {
+      datePositions.set(sym, {
+        symbol: sym,
+        name: dp.security.name,
+        quantity: Number(dp.quantity),
+        marketValue: Number(dp.marketValue),
+        marketPrice: Number(dp.marketPrice),
+        currency: dp.currency,
+      });
+    }
+  }
+
+  const formattedDailyPositions: Record<string, Array<{ symbol: string; name: string; quantity: number; marketValue: number; marketPrice: number; currency: string }>> = {};
+  for (const [dateKey, posMap] of dailyPositionMap.entries()) {
+    formattedDailyPositions[dateKey] = Array.from(posMap.values());
   }
 
   return {
-    snapshots: snapshots.map((s) => ({
-      date: s.date.toISOString().split("T")[0],
-      value: Number(s.totalValue),
-      dailyReturn: s.dailyReturn ? Number(s.dailyReturn) : null,
-      dailyPnl: s.dailyPnl ? Number(s.dailyPnl) : null,
-      maxDrawdown: s.maxDrawdown ? Number(s.maxDrawdown) : null,
-    })),
-    dailyPositions: Object.fromEntries(
-      Array.from(dailyPositionMap.entries()).map(([date, dps]) => [
-        date,
-        dps.map((dp) => ({
-          symbol: dp.security.symbol,
-          name: dp.security.name,
-          quantity: Number(dp.quantity),
-          marketValue: Number(dp.marketValue),
-          marketPrice: Number(dp.marketPrice),
-          currency: dp.currency,
-        })),
-      ])
-    ) as Record<string, Array<{ symbol: string; name: string; quantity: number; marketValue: number; marketPrice: number; currency: string }>>,
+    snapshots: combinedSnapshots,
+    dailyPositions: formattedDailyPositions,
     monthlyData,
     positionRanking,
   };

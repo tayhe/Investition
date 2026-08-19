@@ -16,12 +16,17 @@ async function getLatestRates(): Promise<Map<string, number>> {
   return map;
 }
 
-function convertToUsd(amount: number, currency: string, rates: Map<string, number>): number {
-  if (currency === "USD") return amount;
-  const direct = rates.get(`USD_${currency}`);
-  if (direct) return amount / direct;
-  const inverse = rates.get(`${currency}_USD`);
-  if (inverse) return amount * inverse;
+function convertCurrency(amount: number, from: string, to: string, rates: Map<string, number>): number {
+  if (from === to) return amount;
+  const direct = rates.get(`${from}_${to}`);
+  if (direct) return amount * direct;
+  const inverse = rates.get(`${to}_${from}`);
+  if (inverse && inverse > 0) return amount / inverse;
+  const fromToUsd = from === "USD" ? 1 : (rates.get(`${from}_USD`) ?? (rates.get(`USD_${from}`) ? 1 / rates.get(`USD_${from}`)! : null));
+  const toToUsd = to === "USD" ? 1 : (rates.get(`${to}_USD`) ?? (rates.get(`USD_${to}`) ? 1 / rates.get(`USD_${to}`)! : null));
+  if (fromToUsd !== null && toToUsd !== null && toToUsd > 0) {
+    return (amount * fromToUsd) / toToUsd;
+  }
   return amount;
 }
 
@@ -53,14 +58,13 @@ async function getPortfolioData() {
     const currentPrice = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
     const qty = Number(pos.quantity);
     const avgCost = Number(pos.avgCost);
-    const multiplier = pos.security.type === "OPTION" ? 100 : 1;
+    const multiplier = pos.security.type === "OPTION" ? 100 : Number(pos.security.multiplier || 1);
     const costBasis = qty * multiplier * avgCost;
     const marketValue = qty * multiplier * currentPrice;
     const pnl = marketValue - costBasis;
-    const pnlPercent = costBasis !== 0 ? (pnl / Math.abs(costBasis)) * 100 : 0;
-    const usdMarketValue = convertToUsd(marketValue, pos.currency, rates);
-    const rate = pos.currency === "USD" ? 1 : (rates.get(`USD_${pos.currency}`) ? 1 / rates.get(`USD_${pos.currency}`)! : rates.get(`${pos.currency}_USD`) ?? 1);
-    const usdPrice = currentPrice * rate;
+    const pnlPercent = Math.abs(costBasis) > 0 ? (pnl / Math.abs(costBasis)) * 100 : 0;
+    const usdMarketValue = convertCurrency(marketValue, pos.currency, "USD", rates);
+    const usdPrice = convertCurrency(currentPrice, pos.currency, "USD", rates);
 
     return {
       symbol: pos.security.symbol,
@@ -80,22 +84,37 @@ async function getPortfolioData() {
 
   enriched.sort((a, b) => b.usdMarketValue - a.usdMarketValue);
 
+  const marketTargetCurrency: Record<string, string> = {
+    US: "USD",
+    HK: "HKD",
+    A: "CNY",
+    FUND: "USD",
+  };
+
   const marketMap = new Map<string, { value: number; pnl: number; currency: string }>();
   for (const pos of enriched) {
-    const existing = marketMap.get(pos.market) || { value: 0, pnl: 0, currency: pos.currency };
-    existing.value += pos.marketValue;
-    existing.pnl += pos.pnl;
+    const targetCur = marketTargetCurrency[pos.market] || pos.currency;
+    const existing = marketMap.get(pos.market) || { value: 0, pnl: 0, currency: targetCur };
+    const convertedVal = convertCurrency(pos.marketValue, pos.currency, targetCur, rates);
+    const convertedPnl = convertCurrency(pos.pnl, pos.currency, targetCur, rates);
+    existing.value += convertedVal;
+    existing.pnl += convertedPnl;
     marketMap.set(pos.market, existing);
   }
 
   const marketLabels: Record<string, string> = { US: "美股", HK: "港股", A: "A股", FUND: "基金" };
-  const marketSummary = Array.from(marketMap.entries()).map(([market, data]) => ({
-    market,
-    label: marketLabels[market] || market,
-    value: data.value,
-    pnl: data.pnl,
-    currency: data.currency,
-  }));
+  const marketSummary = Array.from(marketMap.entries()).map(([market, data]) => {
+    const cost = data.value - data.pnl;
+    const pnlPct = Math.abs(cost) > 0 ? (data.pnl / Math.abs(cost)) * 100 : 0;
+    return {
+      market,
+      label: marketLabels[market] || market,
+      value: data.value,
+      pnl: data.pnl,
+      pnlPct,
+      currency: data.currency,
+    };
+  });
 
   return { positions: enriched, marketSummary };
 }
@@ -120,7 +139,7 @@ export default async function PortfolioPage() {
                 {m.pnl >= 0 ? "+" : ""}
                 {formatCurrency(m.pnl, m.currency)}
                 {" "}
-                ({m.value - m.pnl > 0 ? ((m.pnl / (m.value - m.pnl)) * 100).toFixed(2) : "0.00"}%)
+                ({m.pnl >= 0 ? "+" : ""}{m.pnlPct.toFixed(2)}%)
               </div>
             </div>
           ))}

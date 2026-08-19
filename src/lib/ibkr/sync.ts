@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { syncIbkrFlex, parseFlexXml, parseAllDailyPositions, type IbkrFlexConfig, type FlexReport } from "./flex";
 import { mapIbkrExchangeToMarket } from "./flex";
 import { updatePositionsWithFifo } from "./fifo";
+import { getLatestRate } from "@/lib/prices/exchange-rate";
 import { Prisma } from "@/generated/prisma/client";
 
 const { Decimal } = Prisma;
@@ -151,7 +152,7 @@ async function storeDailyPositions(accountId: string, xml: string) {
     if (!security) continue;
 
     const parts = dp.date.split("-");
-    const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    const date = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
 
     await db.dailyPosition.upsert({
       where: {
@@ -277,9 +278,9 @@ function parseIbkrDate(dateStr: string, timeStr?: string): Date {
     const hour = parseInt(t.slice(0, 2)) || 0;
     const min = parseInt(t.slice(2, 4)) || 0;
     const sec = parseInt(t.slice(4, 6)) || 0;
-    return new Date(year, month, day, hour, min, sec);
+    return new Date(Date.UTC(year, month, day, hour, min, sec));
   }
-  return new Date(year, month, day);
+  return new Date(Date.UTC(year, month, day));
 }
 
 export async function upsertPositions(accountId: string, report: FlexReport) {
@@ -299,6 +300,9 @@ export async function upsertPositions(accountId: string, report: FlexReport) {
 
     activeSecurityIds.add(security.id);
 
+    const mult = Number(security.multiplier) || (security.type === "OPTION" ? 100 : 1);
+    const costBasis = Math.abs(pos.quantity * mult * pos.averageCost);
+
     await db.position.upsert({
       where: {
         accountId_securityId: {
@@ -309,7 +313,7 @@ export async function upsertPositions(accountId: string, report: FlexReport) {
       update: {
         quantity: new Decimal(pos.quantity.toString()),
         avgCost: new Decimal(pos.averageCost.toString()),
-        costBasis: new Decimal(0),
+        costBasis: new Decimal(costBasis.toFixed(4)),
         updatedAt: new Date(),
       },
       create: {
@@ -317,7 +321,7 @@ export async function upsertPositions(accountId: string, report: FlexReport) {
         securityId: security.id,
         quantity: new Decimal(pos.quantity.toString()),
         avgCost: new Decimal(pos.averageCost.toString()),
-        costBasis: new Decimal(0),
+        costBasis: new Decimal(costBasis.toFixed(4)),
         currency: pos.currency,
       },
     });
@@ -358,7 +362,16 @@ export async function createDailySnapshot(accountId: string, date: Date) {
 
     const multiplier = pos.security.multiplier || new Decimal(1);
     const price = latestPrice ? latestPrice.close : pos.avgCost;
-    positionsValue = positionsValue.add(pos.quantity.mul(multiplier).mul(price));
+    const rawValue = pos.quantity.mul(multiplier).mul(price);
+
+    // Convert to account base currency
+    let fxRate = 1;
+    if (pos.currency !== account.currency) {
+      const rate = await getLatestRate(pos.currency, account.currency);
+      if (rate && rate > 0) fxRate = rate;
+    }
+
+    positionsValue = positionsValue.add(rawValue.mul(new Decimal(fxRate.toString())));
   }
 
   const cashBalance = new Decimal(0);
@@ -374,7 +387,7 @@ export async function createDailySnapshot(accountId: string, date: Date) {
   if (prevSnapshot) {
     dailyPnl = totalValue.sub(prevSnapshot.totalValue);
     if (!prevSnapshot.totalValue.isZero()) {
-      dailyReturn = dailyPnl.div(prevSnapshot.totalValue).mul(100);
+      dailyReturn = dailyPnl.div(prevSnapshot.totalValue.abs()).mul(100);
     }
   }
 
@@ -385,7 +398,7 @@ export async function createDailySnapshot(accountId: string, date: Date) {
 
   let cumulativeReturn = null;
   if (firstSnapshot && !firstSnapshot.totalValue.isZero()) {
-    cumulativeReturn = totalValue.sub(firstSnapshot.totalValue).div(firstSnapshot.totalValue).mul(100);
+    cumulativeReturn = totalValue.sub(firstSnapshot.totalValue).div(firstSnapshot.totalValue.abs()).mul(100);
   }
 
   const allSnapshots = await db.snapshot.findMany({
@@ -400,16 +413,21 @@ export async function createDailySnapshot(accountId: string, date: Date) {
     if (snap.totalValue.greaterThan(peak)) {
       peak = snap.totalValue;
     }
-    const dd = peak.sub(snap.totalValue).div(peak).mul(100);
-    if (dd.greaterThan(maxDrawdown)) {
-      maxDrawdown = dd;
+    if (peak.greaterThan(0)) {
+      const dd = peak.sub(snap.totalValue).div(peak).mul(100);
+      if (dd.greaterThan(maxDrawdown)) {
+        maxDrawdown = dd;
+      }
     }
   }
-  const currentDd = peak.greaterThan(0)
-    ? peak.sub(totalValue).div(peak).mul(100)
-    : new Decimal(0);
-  if (currentDd.greaterThan(maxDrawdown)) {
-    maxDrawdown = currentDd;
+  if (totalValue.greaterThan(peak)) {
+    peak = totalValue;
+  }
+  if (peak.greaterThan(0)) {
+    const currentDd = peak.sub(totalValue).div(peak).mul(100);
+    if (currentDd.greaterThan(maxDrawdown)) {
+      maxDrawdown = currentDd;
+    }
   }
 
   await db.snapshot.upsert({

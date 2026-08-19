@@ -47,5 +47,6 @@ export function getToday(): Date {
   const month = parseInt(parts.find((p) => p.type === "month")!.value) - 1;
   const day = parseInt(parts.find((p) => p.type === "day")!.value);
 
-  return new Date(year, month, day);
+  return new Date(Date.UTC(year, month, day));
 }
+

@@ -77,14 +77,12 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
   const [viewYear, setViewYear] = useState(currentYear);
 
   const monthSnapshots = snapshots.filter((s) => s.date.startsWith(viewMonth));
-  const monthStart = monthSnapshots.length > 0 ? monthSnapshots[0].value : 0;
-  const monthEnd = monthSnapshots.length > 0 ? monthSnapshots[monthSnapshots.length - 1].value : 0;
-  const monthPnl = monthEnd - monthStart;
+  const monthPnl = monthSnapshots.reduce((sum, s) => sum + (s.dailyPnl ?? 0), 0);
+  const monthStart = monthSnapshots.length > 0 ? monthSnapshots[0].value - (monthSnapshots[0].dailyPnl ?? 0) : 0;
   const monthReturn = monthStart > 0 ? (monthPnl / monthStart) * 100 : 0;
-  const monthMaxDD = monthSnapshots.reduce(
-    (min, s) => (s.maxDrawdown !== null && s.maxDrawdown < min ? s.maxDrawdown : min),
-    0
-  );
+  const monthMaxDD = monthSnapshots.length > 0
+    ? Math.max(0, ...monthSnapshots.map((s) => s.maxDrawdown ?? 0))
+    : 0;
 
   const dailyChartData = monthSnapshots.map((s) => ({
     date: s.date.slice(8),
@@ -94,14 +92,12 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
   }));
 
   const yearSnapshots = snapshots.filter((s) => s.date.startsWith(String(viewYear)));
-  const yearStart = yearSnapshots.length > 0 ? yearSnapshots[0].value : 0;
-  const yearEnd = yearSnapshots.length > 0 ? yearSnapshots[yearSnapshots.length - 1].value : 0;
-  const yearPnl = yearEnd - yearStart;
+  const yearPnl = yearSnapshots.reduce((sum, s) => sum + (s.dailyPnl ?? 0), 0);
+  const yearStart = yearSnapshots.length > 0 ? yearSnapshots[0].value - (yearSnapshots[0].dailyPnl ?? 0) : 0;
   const yearReturn = yearStart > 0 ? (yearPnl / yearStart) * 100 : 0;
-  const yearMaxDD = yearSnapshots.reduce(
-    (min, s) => (s.maxDrawdown !== null && s.maxDrawdown < min ? s.maxDrawdown : min),
-    0
-  );
+  const yearMaxDD = yearSnapshots.length > 0
+    ? Math.max(0, ...yearSnapshots.map((s) => s.maxDrawdown ?? 0))
+    : 0;
 
   const filteredMonthlyData = monthlyData.filter((m) => m.month.startsWith(String(viewYear)));
   const monthlyChartData = filteredMonthlyData.map((m) => ({
@@ -117,63 +113,61 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
       const dayPositions = dailyPositions[selectedDay];
       if (!dayPositions || dayPositions.length === 0) return [];
 
-      const monthStart = viewMonth + "-01";
-      let startPositions: DailyPositionEntry[] = [];
-      for (const [date, dps] of Object.entries(dailyPositions)) {
-        if (date.startsWith(viewMonth) && date <= selectedDay) {
-          if (!startPositions.length || date < monthStart) {
-            startPositions = dps;
-            break;
-          }
-        }
-      }
-      const startMap = new Map(startPositions.map((p) => [p.symbol, p.marketValue]));
+      // Find the previous trading day in the dataset
+      const allDates = Object.keys(dailyPositions).sort();
+      const prevDateIdx = allDates.indexOf(selectedDay) - 1;
+      const prevPositions = prevDateIdx >= 0 ? dailyPositions[allDates[prevDateIdx]] : [];
+      const prevMap = new Map(prevPositions.map((p) => [p.symbol, p]));
 
       const pnlList = dayPositions
         .map((p) => {
-          const startValue = startMap.get(p.symbol) ?? 0;
-          const pnl = p.marketValue - startValue;
+          const prev = prevMap.get(p.symbol);
+          // If held previously, compute daily price change * quantity
+          const pnl = prev && prev.marketPrice > 0
+            ? (p.marketPrice - prev.marketPrice) * p.quantity * (p.marketValue / (p.marketPrice * p.quantity || 1))
+            : 0;
           return { symbol: p.symbol, name: p.name, pnl, contribution: 0 };
         })
         .filter((p) => p.pnl !== 0)
         .sort((a, b) => b.pnl - a.pnl);
 
-      const totalPnl = pnlList.reduce((sum, p) => sum + Math.abs(p.pnl), 0);
+      const totalPnlAbs = pnlList.reduce((sum, p) => sum + Math.abs(p.pnl), 0);
       for (const p of pnlList) {
-        p.contribution = totalPnl !== 0 ? (p.pnl / totalPnl) * 100 : 0;
+        p.contribution = totalPnlAbs > 0 ? (p.pnl / totalPnlAbs) * 100 : 0;
       }
-      return pnlList;
+      return pnlList.length > 0 ? pnlList : positionRanking;
     } else {
       if (!selectedMonth) return positionRanking;
-      const firstDate = Object.keys(dailyPositions)
+      const monthDates = Object.keys(dailyPositions)
         .filter((d) => d.startsWith(selectedMonth))
-        .sort()[0];
-      const lastDate = Object.keys(dailyPositions)
-        .filter((d) => d.startsWith(selectedMonth))
-        .sort()
-        .pop();
+        .sort();
 
-      if (!firstDate || !lastDate) return [];
-      const firstPositions = dailyPositions[firstDate];
-      const lastPositions = dailyPositions[lastDate];
-      const firstMap = new Map(firstPositions.map((p) => [p.symbol, p.marketValue]));
+      if (monthDates.length === 0) return [];
+      const firstDate = monthDates[0];
+      const lastDate = monthDates[monthDates.length - 1];
+
+      const firstPositions = dailyPositions[firstDate] || [];
+      const lastPositions = dailyPositions[lastDate] || [];
+      const firstMap = new Map(firstPositions.map((p) => [p.symbol, p]));
 
       const pnlList = lastPositions
         .map((p) => {
-          const startValue = firstMap.get(p.symbol) ?? 0;
-          const pnl = p.marketValue - startValue;
+          const first = firstMap.get(p.symbol);
+          const pnl = first && first.marketPrice > 0
+            ? (p.marketPrice - first.marketPrice) * p.quantity * (p.marketValue / (p.marketPrice * p.quantity || 1))
+            : 0;
           return { symbol: p.symbol, name: p.name, pnl, contribution: 0 };
         })
         .filter((p) => p.pnl !== 0)
         .sort((a, b) => b.pnl - a.pnl);
 
-      const totalPnl = pnlList.reduce((sum, p) => sum + Math.abs(p.pnl), 0);
+      const totalPnlAbs = pnlList.reduce((sum, p) => sum + Math.abs(p.pnl), 0);
       for (const p of pnlList) {
-        p.contribution = totalPnl !== 0 ? (p.pnl / totalPnl) * 100 : 0;
+        p.contribution = totalPnlAbs > 0 ? (p.pnl / totalPnlAbs) * 100 : 0;
       }
-      return pnlList;
+      return pnlList.length > 0 ? pnlList : positionRanking;
     }
-  }, [view, selectedDay, selectedMonth, dailyPositions, positionRanking, viewMonth]);
+  }, [view, selectedDay, selectedMonth, dailyPositions, positionRanking]);
 
   if (snapshots.length === 0) {
     return (

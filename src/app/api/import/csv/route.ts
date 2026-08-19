@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { parseCsv } from "@/lib/csv/parser";
+import { updatePositionsWithFifo } from "@/lib/ibkr/fifo";
+import { createDailySnapshot } from "@/lib/ibkr/sync";
+import { getToday } from "@/lib/utils";
 import { Prisma } from "@/generated/prisma/client";
 
 const { Decimal } = Prisma;
@@ -44,8 +47,10 @@ export async function POST(request: NextRequest) {
     let positionsCount = 0;
 
     for (const trade of result.trades) {
+      const isOption = isOptionSymbol(trade.symbol);
       const exchange = guessExchange(trade.symbol);
       const market = guessMarket(trade.symbol, exchange);
+      const mult = isOption ? 100 : 1;
 
       let security = await db.security.findUnique({
         where: { symbol_exchange: { symbol: trade.symbol, exchange } },
@@ -59,7 +64,8 @@ export async function POST(request: NextRequest) {
             exchange,
             market,
             currency: trade.currency,
-            type: "STOCK",
+            type: isOption ? "OPTION" : "STOCK",
+            multiplier: mult,
           },
         });
       }
@@ -83,8 +89,10 @@ export async function POST(request: NextRequest) {
     }
 
     for (const pos of result.positions) {
+      const isOption = isOptionSymbol(pos.symbol);
       const exchange = guessExchange(pos.symbol);
       const market = guessMarket(pos.symbol, exchange);
+      const mult = isOption ? 100 : 1;
 
       let security = await db.security.findUnique({
         where: { symbol_exchange: { symbol: pos.symbol, exchange } },
@@ -98,10 +106,13 @@ export async function POST(request: NextRequest) {
             exchange,
             market,
             currency: pos.currency,
-            type: "STOCK",
+            type: isOption ? "OPTION" : "STOCK",
+            multiplier: mult,
           },
         });
       }
+
+      const totalCostBasis = pos.price * Math.abs(pos.quantity) * mult;
 
       await db.position.upsert({
         where: {
@@ -110,7 +121,7 @@ export async function POST(request: NextRequest) {
         update: {
           quantity: new Decimal(pos.quantity.toString()),
           avgCost: new Decimal(pos.price.toString()),
-          costBasis: new Decimal((pos.price * Math.abs(pos.quantity)).toString()),
+          costBasis: new Decimal(totalCostBasis.toString()),
           updatedAt: new Date(),
         },
         create: {
@@ -118,12 +129,18 @@ export async function POST(request: NextRequest) {
           securityId: security.id,
           quantity: new Decimal(pos.quantity.toString()),
           avgCost: new Decimal(pos.price.toString()),
-          costBasis: new Decimal((pos.price * Math.abs(pos.quantity)).toString()),
+          costBasis: new Decimal(totalCostBasis.toString()),
           currency: pos.currency,
         },
       });
       positionsCount++;
     }
+
+    if (tradesCount > 0) {
+      await updatePositionsWithFifo(account.id);
+    }
+
+    await createDailySnapshot(account.id, getToday());
 
     return NextResponse.json({
       success: true,
@@ -155,6 +172,10 @@ function guessMarket(symbol: string, exchange: string): "US" | "HK" | "A" | "FUN
   if (["SEHK"].includes(exchange)) return "HK";
   if (["SSE", "SZSE"].includes(exchange)) return "A";
   return "US";
+}
+
+function isOptionSymbol(symbol: string): boolean {
+  return /^(\S+)\s+(\d{6}[CP]\d{8})$/.test(symbol.trim()) || /^[A-Z]+\d{6}[CP]\d{8}$/.test(symbol.trim());
 }
 
 function parseDate(dateStr: string): Date {
