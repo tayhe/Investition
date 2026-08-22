@@ -41,9 +41,27 @@ export interface FlexPosition {
   contractType: string;
 }
 
+export interface FlexCashBalance {
+  currency: string;           // "USD", "EUR", "BASE_SUMMARY" etc.
+  endingCash: number;         // trade-date basis (use for snapshot)
+  endingSettledCash: number;  // settlement-date basis
+}
+
+export interface FlexCashTransaction {
+  currency: string;
+  dateTime: string;
+  amount: number;             // signed: negative = outflow
+  type: string;               // "Dividend" | "Deposit" | "Withdrawal" | "Commissions" | ...
+  description: string;
+  fxRateToBase: number;
+}
+
 export interface FlexReport {
   trades: FlexTrade[];
   positions: FlexPosition[];
+  cashBalances: FlexCashBalance[];
+  cashTransactions: FlexCashTransaction[];
+  baseCurrency: string;
   year: number;
 }
 
@@ -249,7 +267,55 @@ export function parseFlexXml(xml: string): FlexReport {
 
   const positions = Array.from(posMap.values());
 
-  return { trades, positions, year };
+  // Parse AccountInformation for base currency
+  let baseCurrency = "USD";
+  const acctInfoMatch = lastXml.match(/<AccountInformation\s+([^>]*)\/>/);
+  if (acctInfoMatch) {
+    const acctAttrs = parseXmlAttributes(acctInfoMatch[1]);
+    if (acctAttrs.currency) baseCurrency = acctAttrs.currency;
+  }
+
+  // Parse CashReportCurrency entries (from Cash Report section)
+  const cashBalances: FlexCashBalance[] = [];
+  const cashBalanceRegex = /<CashReportCurrency\s+([^>]*)\/>/g;
+  while ((match = cashBalanceRegex.exec(lastXml)) !== null) {
+    const attrs = parseXmlAttributes(match[1]);
+    cashBalances.push({
+      currency: attrs.currency || "",
+      endingCash: parseFloat(attrs.endingCash || "0"),
+      endingSettledCash: parseFloat(attrs.endingSettledCash || "0"),
+    });
+  }
+
+  // Parse CashTransaction entries (from Cash Transactions section)
+  const cashTransactions: FlexCashTransaction[] = [];
+  const cashTxRegex = /<CashTransaction\s+([^>]*)\/>/g;
+  while ((match = cashTxRegex.exec(lastXml)) !== null) {
+    const attrs = parseXmlAttributes(match[1]);
+    cashTransactions.push({
+      currency: attrs.currency || "",
+      dateTime: attrs.dateTime || "",
+      amount: parseFloat(attrs.amount || "0"),
+      type: attrs.type || "",
+      description: attrs.description || "",
+      fxRateToBase: parseFloat(attrs.fxRateToBase || "1"),
+    });
+  }
+
+  return { trades, positions, cashBalances, cashTransactions, baseCurrency, year };
+}
+
+/** Returns the account's total cash in base currency from a parsed FlexReport. */
+export function getCashBalance(
+  cashBalances: FlexCashBalance[],
+  baseCurrency: string
+): number {
+  // Multi-currency accounts include a BASE_SUMMARY row already converted
+  const baseSummary = cashBalances.find((c) => c.currency === "BASE_SUMMARY");
+  if (baseSummary) return baseSummary.endingCash;
+  // Single-currency: use the row matching the account base currency
+  const direct = cashBalances.find((c) => c.currency === baseCurrency);
+  return direct?.endingCash ?? 0;
 }
 
 function parseXmlAttributes(attrString: string): Record<string, string> {

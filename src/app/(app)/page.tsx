@@ -61,7 +61,14 @@ async function getDashboardData() {
   const securityIds = [...new Set(positions.map((p) => p.securityId))];
   const priceMap = await getLatestPrices(securityIds);
 
-  const cashBalance = 0;
+  // Sum latest cashBalance per account from snapshots (ordered asc → last entry = latest per account)
+  const latestCashByAccount = new Map<string, { cashBalance: number; currency: string }>();
+  for (const s of snapshots) {
+    latestCashByAccount.set(s.accountId, { cashBalance: Number(s.cashBalance), currency: s.currency });
+  }
+  const cashBalance = Array.from(latestCashByAccount.values()).reduce((sum, s) => {
+    return sum + convertCurrency(s.cashBalance, s.currency, baseCurrency, rates);
+  }, 0);
 
   const positionsValue = positions.reduce((sum, pos) => {
     const price = priceMap.get(pos.securityId) ?? Number(pos.avgCost);

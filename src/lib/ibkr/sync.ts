@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { syncIbkrFlex, parseFlexXml, parseAllDailyPositions, type IbkrFlexConfig, type FlexReport } from "./flex";
+import { syncIbkrFlex, parseFlexXml, parseAllDailyPositions, getCashBalance, type IbkrFlexConfig, type FlexReport } from "./flex";
 import { mapIbkrExchangeToMarket } from "./flex";
 import { updatePositionsWithFifo } from "./fifo";
 import { getLatestRate } from "@/lib/prices/exchange-rate";
@@ -374,7 +374,18 @@ export async function createDailySnapshot(accountId: string, date: Date) {
     positionsValue = positionsValue.add(rawValue.mul(new Decimal(fxRate.toString())));
   }
 
-  const cashBalance = new Decimal(0);
+  // Get real cash balance from latest cached Flex XML
+  let cashBalance = new Decimal(0);
+  const latestCache = await db.flexCache.findFirst({
+    where: { accountId },
+    orderBy: { createdAt: "desc" },
+    select: { xml: true },
+  });
+  if (latestCache) {
+    const cachedReport = parseFlexXml(latestCache.xml);
+    const cash = getCashBalance(cachedReport.cashBalances, account.currency);
+    if (cash !== 0) cashBalance = new Decimal(cash.toFixed(4));
+  }
   const totalValue = positionsValue.add(cashBalance);
 
   const prevSnapshot = await db.snapshot.findFirst({
