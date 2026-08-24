@@ -48,6 +48,7 @@ export interface FlexCashBalance {
 }
 
 export interface FlexCashTransaction {
+  transactionId?: string;
   currency: string;
   dateTime: string;
   amount: number;             // signed: negative = outflow
@@ -287,20 +288,31 @@ export function parseFlexXml(xml: string): FlexReport {
     });
   }
 
-  // Parse CashTransaction entries (from Cash Transactions section)
-  const cashTransactions: FlexCashTransaction[] = [];
+  // Parse CashTransaction entries across all statements (from Cash Transactions section)
+  const cashTxMap = new Map<string, FlexCashTransaction>();
   const cashTxRegex = /<CashTransaction\s+([^>]*)\/>/g;
-  while ((match = cashTxRegex.exec(lastXml)) !== null) {
+  while ((match = cashTxRegex.exec(xml)) !== null) {
     const attrs = parseXmlAttributes(match[1]);
-    cashTransactions.push({
-      currency: attrs.currency || "",
-      dateTime: attrs.dateTime || "",
-      amount: parseFloat(attrs.amount || "0"),
-      type: attrs.type || "",
+    const transactionId = attrs.transactionID || attrs.transactionId || "";
+    const dateTime = attrs.dateTime || attrs.reportDate || "";
+    const currency = attrs.currency || "";
+    const amount = parseFloat(attrs.amount || "0");
+    const type = attrs.type || "";
+
+    const dedupKey = transactionId || `${dateTime}_${type}_${amount}_${currency}`;
+    if (cashTxMap.has(dedupKey)) continue;
+
+    cashTxMap.set(dedupKey, {
+      transactionId: transactionId || undefined,
+      currency,
+      dateTime,
+      amount,
+      type,
       description: attrs.description || "",
       fxRateToBase: parseFloat(attrs.fxRateToBase || "1"),
     });
   }
+  const cashTransactions = Array.from(cashTxMap.values());
 
   return { trades, positions, cashBalances, cashTransactions, baseCurrency, year };
 }
