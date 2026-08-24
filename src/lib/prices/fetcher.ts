@@ -5,7 +5,6 @@ import { getToday } from "@/lib/utils";
 const yahooFinance = new YahooFinance();
 
 const REQUEST_DELAY_MS = 200;
-const PRICE_CACHE_HOURS = 4;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -46,14 +45,12 @@ function toYahooSymbol(ibkrSymbol: string, exchange: string): string | null {
   return ibkrSymbol;
 }
 
-async function needsPriceUpdate(securityId: string): Promise<boolean> {
-  const cutoff = new Date();
-  cutoff.setHours(cutoff.getHours() - PRICE_CACHE_HOURS);
-  const recent = await db.price.findFirst({
-    where: { securityId, date: { gte: cutoff } },
+async function needsPriceUpdate(securityId: string, today: Date): Promise<boolean> {
+  const existing = await db.price.findUnique({
+    where: { securityId_date: { securityId, date: today } },
     select: { id: true },
   });
-  return !recent;
+  return !existing;
 }
 
 export async function fetchPrices() {
@@ -71,7 +68,7 @@ export async function fetchPrices() {
       continue;
     }
 
-    if (!(await needsPriceUpdate(sec.id))) {
+    if (!(await needsPriceUpdate(sec.id, today))) {
       results.skipped++;
       continue;
     }

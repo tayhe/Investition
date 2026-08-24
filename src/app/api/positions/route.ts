@@ -29,9 +29,15 @@ export async function GET(request: NextRequest) {
         });
 
         const currentPrice = latestPrice ? Number(latestPrice.close) : Number(pos.avgCost);
-        const marketValue = Number(pos.quantity) * currentPrice;
-        const costBasis = Number(pos.costBasis);
-        const pnl = marketValue - costBasis;
+        const multiplier = pos.security.type === "OPTION" ? 100 : Number(pos.security.multiplier || 1);
+        const qty = Number(pos.quantity);
+        const avgCost = Number(pos.avgCost);
+        const marketValue = qty * multiplier * currentPrice;
+        const rawCostBasis = Number(pos.costBasis);
+        const costBasis = rawCostBasis > 0 ? rawCostBasis : Math.abs(qty * multiplier * avgCost);
+        // Unified PnL formula: for short positions, costBasis is treated as negative (sold proceeds)
+        const signedCostBasis = qty >= 0 ? costBasis : -costBasis;
+        const pnl = marketValue - signedCostBasis;
         const pnlPercent = costBasis > 0 ? (pnl / costBasis) * 100 : 0;
 
         return {
@@ -39,8 +45,8 @@ export async function GET(request: NextRequest) {
           symbol: pos.security.symbol,
           name: pos.security.name,
           market: pos.security.market,
-          quantity: Number(pos.quantity),
-          avgCost: Number(pos.avgCost),
+          quantity: qty,
+          avgCost,
           currentPrice,
           marketValue,
           pnl,

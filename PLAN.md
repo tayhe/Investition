@@ -151,6 +151,34 @@
 - 持仓集中度分析（HHI 指数）
 - 交易频率统计
 
+#### 5.4 IBKR Flex Query 字段补全（本次建议）
+
+背景：`Account.ibkrFlexToken = 234831580682609539488966`，`ibkrFlexQueryId` 不变；只需在 IBKR Client Portal → Reporting → Flex Queries → Edit 里改 Section 勾选，**Token 不需要重新生成**（之前换 Token 是为了解锁 1025 / IP 级封锁，已确认为维护期误导错误）。
+
+| 优先级 | Flex Section | 对应 XML | 项目里现状 / 收益 |
+|---|---|---|---|
+| 必勾 | **Cash Balance** | `<AssetSummary assetCategory="CASH">`（字段 `proceeds`） | 解 §4.12 的 `cashBalance = 0` 占位符（`sync.ts:364`、`src/app/(app)/page.tsx:36`） |
+| 必勾 | **Cash Transactions** | `<CashTransaction>` / `<ChangeInCash>` | 后续算净入金 / 出金曲线、复盘分析需要时间序列 |
+| 强烈建议 | **Base Currency Summary** | `<AssetSummary>` 每币种汇总 | 多币种账户换算到 base currency，目前未做 |
+| 强烈建议 | **Account Information** | `<AccountInfo>` | accountId / accountAlias / baseCurrency，目前 `accounts[0].currency` 硬编码，多账户会出错 |
+| 强烈建议 | **Conversion Rates** | `<ConversionRate fromCurrency toCurrency rate>` | IBKR 给出的实时 FX，可**省掉 Yahoo Finance 的 USD/CNY、USD/HKD、HKD/CNY、USD/SEK 拉取**（`PLAN.md §4.6`） |
+| 建议 | **Realized & Unrealized PnL Summary** | `<RealizedPnL>` / `<UnrealizedPnL>` | `page.tsx:46-53` 的 `totalPnl` 只算浮动盈亏，缺已实现 PnL |
+| 建议 | **Financial Instrument Information** | `<SecurityInfo>`（含 `expireDate`、`strike`、`multiplier`） | 期权 `multiplier` 在 `page.tsx:40` 硬写 100；持仓描述字段统一 |
+
+不勾：`Margin / Mark-to-Market PnL`（现金账户用不到）、`Client Portal Reports`（冗余）、`Option Exercises & Assignments`（当前不处理 corporate actions）。
+
+IBKR 后台步骤：
+1. 登录 Client Portal → Reporting → Flex Queries → 选当前 Query → Edit
+2. Sections 里勾上上表中勾选项
+3. Report Type 保持 **Activity Statement**，Period 保持 **Year to Date**
+4. Save → Refresh 重新生成 XML → 下载用编辑器打开确认 `<AssetSummary assetCategory="CASH">` 出现
+
+代码侧待办（与本节配套）：
+- `src/lib/ibkr/flex.ts`：新增 `<AssetSummary assetCategory="CASH">` 解析分支，提取 `proceeds`
+- `src/lib/ibkr/sync.ts`：`createDailySnapshot` 接收真实 `cashBalance` 写入（`sync.ts:364` 去掉写死的 0）
+- `src/app/(app)/page.tsx:36`：把 `const cashBalance = 0` 换成从最近一个 Snapshot 取真实值
+- 验证：force-sync 后查 `Snapshot.cashBalance` 是否非零
+
 ### P2 — 体验优化
 
 #### 5.4 移动端适配

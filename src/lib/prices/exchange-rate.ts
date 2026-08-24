@@ -5,7 +5,6 @@ import { getToday } from "@/lib/utils";
 const yahooFinance = new YahooFinance();
 
 const REQUEST_DELAY_MS = 200;
-const RATE_CACHE_HOURS = 4;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -13,6 +12,12 @@ const PAIRS: [string, string][] = [
   ["USD", "CNY"],
   ["USD", "HKD"],
   ["USD", "SEK"],
+  ["USD", "EUR"],
+  ["USD", "GBP"],
+  ["USD", "JPY"],
+  ["USD", "CAD"],
+  ["USD", "AUD"],
+  ["USD", "SGD"],
   ["HKD", "CNY"],
 ];
 
@@ -21,11 +26,13 @@ export async function fetchExchangeRates() {
   const results = { updated: 0, skipped: 0, errors: [] as string[] };
 
   for (const [base, quote] of PAIRS) {
-    const existing = await db.exchangeRate.findFirst({
+    const existing = await db.exchangeRate.findUnique({
       where: {
-        baseCurrency: base,
-        quoteCurrency: quote,
-        date: { gte: new Date(Date.now() - RATE_CACHE_HOURS * 3600 * 1000) },
+        baseCurrency_quoteCurrency_date: {
+          baseCurrency: base,
+          quoteCurrency: quote,
+          date: today,
+        },
       },
     });
 
@@ -77,21 +84,35 @@ export async function getLatestRate(
   baseCurrency: string,
   quoteCurrency: string
 ): Promise<number | null> {
-  if (baseCurrency === quoteCurrency) return 1;
+  const base = baseCurrency.toUpperCase().trim();
+  const quote = quoteCurrency.toUpperCase().trim();
 
+  if (base === quote) return 1;
+
+  // Direct rate
   const rate = await db.exchangeRate.findFirst({
-    where: { baseCurrency, quoteCurrency },
+    where: { baseCurrency: base, quoteCurrency: quote },
     orderBy: { date: "desc" },
   });
 
   if (rate) return Number(rate.rate);
 
+  // Inverse rate
   const inverse = await db.exchangeRate.findFirst({
-    where: { baseCurrency: quoteCurrency, quoteCurrency: baseCurrency },
+    where: { baseCurrency: quote, quoteCurrency: base },
     orderBy: { date: "desc" },
   });
 
-  if (inverse) return 1 / Number(inverse.rate);
+  if (inverse && Number(inverse.rate) > 0) return 1 / Number(inverse.rate);
+
+  // Cross rate via USD triangulation (e.g. SEK -> CNY = (SEK -> USD) * (USD -> CNY))
+  if (base !== "USD" && quote !== "USD") {
+    const baseToUsd = await getLatestRate(base, "USD");
+    const usdToQuote = await getLatestRate("USD", quote);
+    if (baseToUsd !== null && usdToQuote !== null) {
+      return baseToUsd * usdToQuote;
+    }
+  }
 
   return null;
 }
