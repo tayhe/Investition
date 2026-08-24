@@ -57,9 +57,15 @@ async function runIbkrSync() {
 
 async function runDailySnapshot() {
   try {
+    const today = getToday();
+    const dayOfWeek = today.getUTCDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      log("Skipping daily snapshot: non-trading day (weekend)");
+      return;
+    }
+
     log("Starting daily snapshot...");
     const accounts = await db.account.findMany({ select: { id: true } });
-    const today = getToday();
 
     for (const account of accounts) {
       await createDailySnapshot(account.id, today);

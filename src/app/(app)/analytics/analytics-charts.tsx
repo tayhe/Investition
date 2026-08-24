@@ -18,6 +18,7 @@ interface SnapshotData {
   value: number;
   dailyReturn: number | null;
   dailyPnl: number | null;
+  cashFlow?: number | null;
   maxDrawdown: number | null;
 }
 
@@ -27,6 +28,7 @@ interface MonthlyItem {
   shortLabel: string;
   startValue: number;
   endValue: number;
+  cashFlow: number;
   pnl: number;
   returnRate: number;
 }
@@ -77,9 +79,13 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
   const [viewYear, setViewYear] = useState(currentYear);
 
   const monthSnapshots = snapshots.filter((s) => s.date.startsWith(viewMonth));
+  const monthNetFlow = monthSnapshots.reduce((sum, s) => sum + (s.cashFlow ?? 0), 0);
   const monthPnl = monthSnapshots.reduce((sum, s) => sum + (s.dailyPnl ?? 0), 0);
-  const monthStart = monthSnapshots.length > 0 ? monthSnapshots[0].value - (monthSnapshots[0].dailyPnl ?? 0) : 0;
-  const monthReturn = monthStart > 0 ? (monthPnl / monthStart) * 100 : 0;
+  let monthTwr = 1;
+  for (const s of monthSnapshots) {
+    monthTwr *= (1 + (s.dailyReturn ?? 0) / 100);
+  }
+  const monthReturn = monthSnapshots.length > 0 ? (monthTwr - 1) * 100 : 0;
   const monthMaxDD = monthSnapshots.length > 0
     ? Math.max(0, ...monthSnapshots.map((s) => s.maxDrawdown ?? 0))
     : 0;
@@ -92,9 +98,13 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
   }));
 
   const yearSnapshots = snapshots.filter((s) => s.date.startsWith(String(viewYear)));
+  const yearNetFlow = yearSnapshots.reduce((sum, s) => sum + (s.cashFlow ?? 0), 0);
   const yearPnl = yearSnapshots.reduce((sum, s) => sum + (s.dailyPnl ?? 0), 0);
-  const yearStart = yearSnapshots.length > 0 ? yearSnapshots[0].value - (yearSnapshots[0].dailyPnl ?? 0) : 0;
-  const yearReturn = yearStart > 0 ? (yearPnl / yearStart) * 100 : 0;
+  let yearTwr = 1;
+  for (const s of yearSnapshots) {
+    yearTwr *= (1 + (s.dailyReturn ?? 0) / 100);
+  }
+  const yearReturn = yearSnapshots.length > 0 ? (yearTwr - 1) * 100 : 0;
   const yearMaxDD = yearSnapshots.length > 0
     ? Math.max(0, ...yearSnapshots.map((s) => s.maxDrawdown ?? 0))
     : 0;
@@ -246,7 +256,12 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
 
       {view === "month" ? (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard
+              title={`${viewMonth} 出入金`}
+              value={`${monthNetFlow >= 0 ? "+" : ""}$${monthNetFlow.toFixed(2)}`}
+              subtitle="本月净入金"
+            />
             <StatCard
               title={`${viewMonth} 收益`}
               value={`${monthReturn >= 0 ? "+" : ""}${monthReturn.toFixed(2)}%`}
@@ -254,7 +269,7 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
             />
             <StatCard
               title={`${viewMonth} 盈亏`}
-              value={`$${monthPnl.toFixed(0)}`}
+              value={`${monthPnl >= 0 ? "+" : ""}$${monthPnl.toFixed(0)}`}
               changePositive={monthPnl >= 0}
             />
             <StatCard title={`${viewMonth} 最大回撤`} value={`${monthMaxDD.toFixed(2)}%`} />
@@ -320,7 +335,12 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
         </>
       ) : (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard
+              title={`${viewYear}年出入金`}
+              value={`${yearNetFlow >= 0 ? "+" : ""}$${yearNetFlow.toFixed(2)}`}
+              subtitle="全年净入金"
+            />
             <StatCard
               title={`${viewYear}年收益`}
               value={`${yearReturn >= 0 ? "+" : ""}${yearReturn.toFixed(2)}%`}
@@ -328,7 +348,7 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
             />
             <StatCard
               title={`${viewYear}年盈亏`}
-              value={`$${yearPnl.toFixed(0)}`}
+              value={`${yearPnl >= 0 ? "+" : ""}$${yearPnl.toFixed(0)}`}
               changePositive={yearPnl >= 0}
             />
             <StatCard title={`${viewYear}年最大回撤`} value={`${yearMaxDD.toFixed(2)}%`} />
@@ -434,6 +454,7 @@ function DailyDetailTable({ snapshots }: { snapshots: SnapshotData[] }) {
           <tr className="border-b border-default bg-muted/50">
             <th className="text-left py-3 px-4 text-sm font-medium text-muted">日期</th>
             <th className="text-right py-3 px-4 text-sm font-medium text-muted">总资产</th>
+            <th className="text-right py-3 px-4 text-sm font-medium text-muted">出入金</th>
             <th className="text-right py-3 px-4 text-sm font-medium text-muted">日盈亏</th>
             <th className="text-right py-3 px-4 text-sm font-medium text-muted">日收益率</th>
           </tr>
@@ -443,6 +464,9 @@ function DailyDetailTable({ snapshots }: { snapshots: SnapshotData[] }) {
             <tr key={s.date} className="border-b border-default last:border-0 hover:bg-accent/50">
               <td className="py-3 px-4 text-sm">{s.date}</td>
               <td className="text-right py-3 px-4 text-sm">${s.value.toFixed(2)}</td>
+              <td className="text-right py-3 px-4 text-sm text-muted">
+                {(s.cashFlow ?? 0) !== 0 ? `${(s.cashFlow ?? 0) >= 0 ? "+" : ""}$${(s.cashFlow ?? 0).toFixed(2)}` : "-"}
+              </td>
               <td className={`text-right py-3 px-4 text-sm font-medium ${(s.dailyPnl ?? 0) >= 0 ? "text-green" : "text-red"}`}>
                 {(s.dailyPnl ?? 0) >= 0 ? "+" : ""}${(s.dailyPnl ?? 0).toFixed(2)}
               </td>
@@ -468,6 +492,7 @@ function MonthlyDetailTable({ data }: { data: MonthlyItem[] }) {
           <tr className="border-b border-default bg-muted/50">
             <th className="text-left py-3 px-4 text-sm font-medium text-muted">月份</th>
             <th className="text-right py-3 px-4 text-sm font-medium text-muted">期初资产</th>
+            <th className="text-right py-3 px-4 text-sm font-medium text-muted">出入金</th>
             <th className="text-right py-3 px-4 text-sm font-medium text-muted">期末资产</th>
             <th className="text-right py-3 px-4 text-sm font-medium text-muted">盈亏</th>
             <th className="text-right py-3 px-4 text-sm font-medium text-muted">收益率</th>
@@ -478,6 +503,9 @@ function MonthlyDetailTable({ data }: { data: MonthlyItem[] }) {
             <tr key={m.month} className="border-b border-default last:border-0 hover:bg-accent/50">
               <td className="py-3 px-4 text-sm font-medium">{m.label}</td>
               <td className="text-right py-3 px-4 text-sm">${m.startValue.toFixed(2)}</td>
+              <td className="text-right py-3 px-4 text-sm text-muted">
+                {m.cashFlow !== 0 ? `${m.cashFlow >= 0 ? "+" : ""}$${m.cashFlow.toFixed(2)}` : "-"}
+              </td>
               <td className="text-right py-3 px-4 text-sm">${m.endValue.toFixed(2)}</td>
               <td className={`text-right py-3 px-4 text-sm font-medium ${m.pnl >= 0 ? "text-green" : "text-red"}`}>
                 {m.pnl >= 0 ? "+" : ""}${m.pnl.toFixed(2)}

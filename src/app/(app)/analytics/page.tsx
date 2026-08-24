@@ -1,31 +1,9 @@
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { getLatestPrices } from "@/lib/prices/cache";
+import { parseCashFlowsByDate } from "@/lib/ibkr/flex";
+import { convertCurrency, getLatestRatesMap } from "@/lib/prices/exchange-rate";
 import { AnalyticsCharts } from "./analytics-charts";
-
-async function getLatestRates(): Promise<Map<string, number>> {
-  const rates = await db.exchangeRate.findMany({ orderBy: { date: "desc" } });
-  const map = new Map<string, number>();
-  for (const r of rates) {
-    const key = `${r.baseCurrency}_${r.quoteCurrency}`;
-    if (!map.has(key)) map.set(key, Number(r.rate));
-  }
-  return map;
-}
-
-function convertCurrency(amount: number, from: string, to: string, rates: Map<string, number>): number {
-  if (from === to) return amount;
-  const direct = rates.get(`${from}_${to}`);
-  if (direct) return amount * direct;
-  const inverse = rates.get(`${to}_${from}`);
-  if (inverse && inverse > 0) return amount / inverse;
-  const fromToUsd = from === "USD" ? 1 : (rates.get(`${from}_USD`) ?? (rates.get(`USD_${from}`) ? 1 / rates.get(`USD_${from}`)! : null));
-  const toToUsd = to === "USD" ? 1 : (rates.get(`${to}_USD`) ?? (rates.get(`USD_${to}`) ? 1 / rates.get(`USD_${to}`)! : null));
-  if (fromToUsd !== null && toToUsd !== null && toToUsd > 0) {
-    return (amount * fromToUsd) / toToUsd;
-  }
-  return amount;
-}
 
 async function getAnalyticsData() {
   const session = await auth();
@@ -43,7 +21,7 @@ async function getAnalyticsData() {
   const accountIds = accounts.map((a) => a.id);
   const baseCurrency = accounts[0].currency || "USD";
 
-  const [snapshots, positions, dailyPositions, rates] = await Promise.all([
+  const [snapshots, positions, dailyPositions, rates, flexCaches] = await Promise.all([
     db.snapshot.findMany({
       where: { accountId: { in: accountIds } },
       orderBy: { date: "asc" },
@@ -57,7 +35,10 @@ async function getAnalyticsData() {
       include: { security: true },
       orderBy: { date: "asc" },
     }),
-    getLatestRates(),
+    getLatestRatesMap(),
+    db.flexCache.findMany({
+      where: { accountId: { in: accountIds } },
+    }),
   ]);
 
   const securityIds = [...new Set(positions.map((p) => p.securityId))];
@@ -87,19 +68,29 @@ async function getAnalyticsData() {
     p.contribution = totalAbsPnl > 0 ? (p.pnl / totalAbsPnl) * 100 : 0;
   }
 
+  // Parse external cash flows (deposits/withdrawals) by account and date
+  const cashFlowsByAccountDate = new Map<string, Map<string, number>>();
+  for (const fc of flexCaches) {
+    const flows = parseCashFlowsByDate(fc.xml);
+    cashFlowsByAccountDate.set(fc.accountId, flows);
+  }
+
   // Combine multi-account snapshots by date
   const accountCurrencyMap = new Map(accounts.map((a) => [a.id, a.currency]));
-  const dateMap = new Map<string, { totalValue: number; dailyPnl: number }>();
+  const dateMap = new Map<string, { totalValue: number; cashFlow: number }>();
 
   for (const s of snapshots) {
     const dateKey = s.date.toISOString().split("T")[0];
     const accCurrency = s.currency || accountCurrencyMap.get(s.accountId) || baseCurrency;
     const val = convertCurrency(Number(s.totalValue), accCurrency, baseCurrency, rates);
-    const pnl = s.dailyPnl ? convertCurrency(Number(s.dailyPnl), accCurrency, baseCurrency, rates) : 0;
 
-    const existing = dateMap.get(dateKey) || { totalValue: 0, dailyPnl: 0 };
+    const accountFlows = cashFlowsByAccountDate.get(s.accountId);
+    const rawFlow = accountFlows?.get(dateKey) || 0;
+    const flow = convertCurrency(rawFlow, accCurrency, baseCurrency, rates);
+
+    const existing = dateMap.get(dateKey) || { totalValue: 0, cashFlow: 0 };
     existing.totalValue += val;
-    existing.dailyPnl += pnl;
+    existing.cashFlow += flow;
     dateMap.set(dateKey, existing);
   }
 
@@ -108,8 +99,10 @@ async function getAnalyticsData() {
   let runningMaxDrawdown = 0;
   const combinedSnapshots = sortedDates.map((dateStr, idx) => {
     const data = dateMap.get(dateStr)!;
-    const prevVal = idx > 0 ? dateMap.get(sortedDates[idx - 1])!.totalValue : data.totalValue - data.dailyPnl;
-    const dailyReturn = prevVal > 0 ? (data.dailyPnl / prevVal) * 100 : 0;
+    const prevVal = idx > 0 ? dateMap.get(sortedDates[idx - 1])!.totalValue : 0;
+    // Exclude cash flow from daily investment P&L
+    const dailyPnl = idx > 0 ? data.totalValue - prevVal - data.cashFlow : 0;
+    const dailyReturn = idx > 0 && prevVal > 0 ? (dailyPnl / prevVal) * 100 : 0;
 
     if (data.totalValue > peak) peak = data.totalValue;
     if (peak > 0) {
@@ -121,33 +114,57 @@ async function getAnalyticsData() {
       date: dateStr,
       value: data.totalValue,
       dailyReturn,
-      dailyPnl: data.dailyPnl,
+      dailyPnl,
+      cashFlow: data.cashFlow,
       maxDrawdown: runningMaxDrawdown,
     };
   });
 
-  // Monthly data from combined snapshots
-  const monthlyMap = new Map<string, { startValue: number; endValue: number; pnl: number }>();
+  // Monthly data from combined snapshots using Time-Weighted Return (TWR)
+  const monthlyMap = new Map<string, {
+    startValue: number;
+    endValue: number;
+    cashFlow: number;
+    pnl: number;
+    dailyReturns: number[];
+  }>();
+
   for (const s of combinedSnapshots) {
     const month = s.date.slice(0, 7);
-    const val = s.value;
-    const existing = monthlyMap.get(month) || { startValue: val - (s.dailyPnl ?? 0), endValue: val, pnl: 0 };
-    existing.endValue = val;
-    existing.pnl += s.dailyPnl ?? 0;
+    const existing = monthlyMap.get(month) || {
+      startValue: s.value,
+      endValue: s.value,
+      cashFlow: 0,
+      pnl: 0,
+      dailyReturns: [],
+    };
+    existing.endValue = s.value;
+    existing.cashFlow += s.cashFlow;
+    existing.pnl += s.dailyPnl;
+    existing.dailyReturns.push(s.dailyReturn);
     monthlyMap.set(month, existing);
   }
 
   const monthlyData = Array.from(monthlyMap.entries())
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([month, data]) => ({
-      month,
-      label: month.slice(0, 4) + "年" + month.slice(5) + "月",
-      shortLabel: month.slice(5) + "月",
-      startValue: data.startValue,
-      endValue: data.endValue,
-      pnl: data.pnl,
-      returnRate: data.startValue > 0 ? ((data.endValue - data.startValue) / data.startValue) * 100 : 0,
-    }));
+    .map(([month, data]) => {
+      let twrFactor = 1;
+      for (const ret of data.dailyReturns) {
+        twrFactor *= (1 + ret / 100);
+      }
+      const returnRate = (twrFactor - 1) * 100;
+
+      return {
+        month,
+        label: month.slice(0, 4) + "年" + month.slice(5) + "月",
+        shortLabel: month.slice(5) + "月",
+        startValue: data.startValue,
+        endValue: data.endValue,
+        cashFlow: data.cashFlow,
+        pnl: data.pnl,
+        returnRate,
+      };
+    });
 
   // Daily position data grouped by date (merged across accounts if same symbol)
   const dailyPositionMap = new Map<string, Map<string, { symbol: string; name: string; quantity: number; marketValue: number; marketPrice: number; currency: string }>>();

@@ -205,7 +205,7 @@ export function parseFlexXml(xml: string): FlexReport {
         const year = parseInt(expiryStr.slice(0, 4));
         const month = parseInt(expiryStr.slice(4, 6)) - 1;
         const day = parseInt(expiryStr.slice(6, 8));
-        const expiry = new Date(year, month, day);
+        const expiry = new Date(Date.UTC(year, month, day));
         if (expiry < today) continue;
       }
     }
@@ -421,4 +421,119 @@ export function parseAllDailyPositions(xml: string): DailyPositionData[] {
   }
 
   return Array.from(dailyMap.values());
+}
+
+/**
+ * Parses all external cash flows (deposits, withdrawals, transfers) by date (YYYY-MM-DD)
+ * in the account's base currency from the Flex report XML.
+ */
+export function parseCashFlowsByDate(xml: string): Map<string, number> {
+  const flowMap = new Map<string, number>();
+
+  // 1. Try CashReportCurrency with currency="BASE_SUMMARY" from daily statements
+  const stmtRegex = /<CashReportCurrency\s+([^>]*)\/>/g;
+  let match;
+  let hasStmtFlows = false;
+  while ((match = stmtRegex.exec(xml)) !== null) {
+    const attrs = parseXmlAttributes(match[1]);
+    if (attrs.currency === "BASE_SUMMARY") {
+      const dw = parseFloat(attrs.depositWithdrawals || "0");
+      const at = parseFloat(attrs.accountTransfers || "0");
+      const it = parseFloat(attrs.internalTransfers || "0");
+      const net = dw + at + it;
+      const fromDate = attrs.fromDate || "";
+      if (fromDate.length >= 8) {
+        const d = `${fromDate.slice(0, 4)}-${fromDate.slice(4, 6)}-${fromDate.slice(6, 8)}`;
+        if (net !== 0) {
+          flowMap.set(d, (flowMap.get(d) || 0) + net);
+          hasStmtFlows = true;
+        }
+      }
+    }
+  }
+
+  // 2. If no CashReportCurrency statement flows found, parse from CashTransaction
+  if (!hasStmtFlows) {
+    const cashTxRegex = /<CashTransaction\s+([^>]*)\/>/g;
+    const seenTx = new Set<string>();
+    while ((match = cashTxRegex.exec(xml)) !== null) {
+      const attrs = parseXmlAttributes(match[1]);
+      const txId = attrs.transactionID || attrs.transactionId || "";
+      const type = attrs.type || "";
+      if (
+        type === "Deposits/Withdrawals" ||
+        type === "Transfers" ||
+        type.toLowerCase().includes("deposit") ||
+        type.toLowerCase().includes("withdrawal")
+      ) {
+        const dt = (attrs.dateTime || attrs.reportDate || "").split(";")[0];
+        const key = txId || `${dt}_${type}_${attrs.amount}_${attrs.currency}`;
+        if (seenTx.has(key)) continue;
+        seenTx.add(key);
+
+        const amount = parseFloat(attrs.amount || "0");
+        const fxRate = parseFloat(attrs.fxRateToBase || "1");
+        const baseAmt = amount * fxRate;
+        const d = dt.length === 8 ? `${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}` : dt;
+        if (d && baseAmt !== 0) {
+          flowMap.set(d, (flowMap.get(d) || 0) + baseAmt);
+        }
+      }
+    }
+  }
+
+  return flowMap;
+}
+
+export interface DailySnapshotData {
+  date: string;
+  positionsValue: number;
+  cashBalance: number;
+  totalValue: number;
+  depositWithdrawals: number;
+}
+
+export function parseAllDailySnapshots(xml: string): DailySnapshotData[] {
+  const statementRegex = /<FlexStatement[^>]*fromDate="(\d{4})(\d{2})(\d{2})"[^>]*>/g;
+  let stmtMatch;
+  const list: DailySnapshotData[] = [];
+
+  while ((stmtMatch = statementRegex.exec(xml)) !== null) {
+    const stmtStart = stmtMatch.index;
+    const stmtDate = `${stmtMatch[1]}-${stmtMatch[2]}-${stmtMatch[3]}`;
+
+    const nextStmtIdx = xml.indexOf("<FlexStatement", stmtStart + 1);
+    const stmtXml = nextStmtIdx >= 0 ? xml.slice(stmtStart, nextStmtIdx) : xml.slice(stmtStart);
+
+    let cash = 0;
+    let dw = 0;
+    const cashMatch = stmtXml.match(/<CashReportCurrency\s+([^>]*currency="BASE_SUMMARY"[^>]*)\/>/);
+    if (cashMatch) {
+      const attrs = parseXmlAttributes(cashMatch[1]);
+      cash = parseFloat(attrs.endingCash || "0");
+      const d = parseFloat(attrs.depositWithdrawals || "0");
+      const at = parseFloat(attrs.accountTransfers || "0");
+      const it = parseFloat(attrs.internalTransfers || "0");
+      dw = d + at + it;
+    }
+
+    let posVal = 0;
+    const posRegex = /<OpenPosition\s+([^>]*)\/>|<ComplexPosition\s+([^>]*)\/>/g;
+    let posMatch;
+    while ((posMatch = posRegex.exec(stmtXml)) !== null) {
+      const attrs = parseXmlAttributes(posMatch[1] || posMatch[2]);
+      const pv = parseFloat(attrs.positionValue || attrs.value || attrs.marketValue || "0");
+      posVal += pv;
+    }
+
+    list.push({
+      date: stmtDate,
+      positionsValue: posVal,
+      cashBalance: cash,
+      totalValue: posVal + cash,
+      depositWithdrawals: dw,
+    });
+  }
+
+  return list;
 }

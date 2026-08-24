@@ -40,7 +40,7 @@ export function PositionsTable({ positions }: PositionsTableProps) {
             <th className="text-right py-3 px-4 text-sm font-medium text-muted">成本价</th>
             <th className="text-right py-3 px-4 text-sm font-medium text-muted">现价</th>
             <th className="text-right py-3 px-4 text-sm font-medium text-muted">市值</th>
-            <th className="text-right py-3 px-4 text-sm font-medium text-muted">盈亏</th>
+            <th className="text-right py-3 px-4 text-sm font-medium text-muted">未实现盈亏</th>
           </tr>
         </thead>
         <tbody>

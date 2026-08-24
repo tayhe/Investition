@@ -116,3 +116,42 @@ export async function getLatestRate(
 
   return null;
 }
+
+export async function getLatestRatesMap(): Promise<Map<string, number>> {
+  const rates = await db.exchangeRate.findMany({
+    orderBy: { date: "desc" },
+  });
+  const map = new Map<string, number>();
+  for (const r of rates) {
+    const key = `${r.baseCurrency}_${r.quoteCurrency}`;
+    if (!map.has(key)) map.set(key, Number(r.rate));
+  }
+  return map;
+}
+
+export function convertCurrency(
+  amount: number,
+  from: string,
+  to: string,
+  rates: Map<string, number>
+): number {
+  if (from === to) return amount;
+  const direct = rates.get(`${from}_${to}`);
+  if (direct) return amount * direct;
+  const inverse = rates.get(`${to}_${from}`);
+  if (inverse && inverse > 0) return amount / inverse;
+  const fromToUsd =
+    from === "USD"
+      ? 1
+      : rates.get(`${from}_USD`) ??
+        (rates.get(`USD_${from}`) ? 1 / rates.get(`USD_${from}`)! : null);
+  const toToUsd =
+    to === "USD"
+      ? 1
+      : rates.get(`${to}_USD`) ??
+        (rates.get(`USD_${to}`) ? 1 / rates.get(`USD_${to}`)! : null);
+  if (fromToUsd !== null && toToUsd !== null && toToUsd > 0) {
+    return (amount * fromToUsd) / toToUsd;
+  }
+  return amount;
+}

@@ -138,7 +138,7 @@ export async function fetchHistoricalPrices(days = 30) {
 
       for (const bar of history) {
         const barDate = new Date(bar.date);
-        const date = new Date(barDate.getUTCFullYear(), barDate.getUTCMonth(), barDate.getUTCDate());
+        const date = new Date(Date.UTC(barDate.getUTCFullYear(), barDate.getUTCMonth(), barDate.getUTCDate()));
 
         await db.price.upsert({
           where: { securityId_date: { securityId: sec.id, date } },

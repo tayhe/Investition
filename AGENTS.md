@@ -103,26 +103,39 @@ const xmlToParse = lastStatementIdx >= 0 ? xml.slice(lastStatementIdx) : xml;
 - 多 statement 中同一交易会重复（commission 正负不同），需按 `ibOrderID + side + qty + price` 去重
 - FlexCache 年份从 XML `fromDate` 提取，不依赖系统时间
 
-### 期权计算（美股）
+### 期权与做空计算
 
-美股期权 1 手 = 100 股。核心公式（quantity 用真实值，负=空头）：
+美股期权 1 手 = 100 股。核心代数公式（quantity 用真实值，负=空头）：
 
 ```
 avgCost      = 每股价格（IBKR 原始 / FIFO 计算）
 currentPrice = 每股价格（Yahoo 原始）
-costBasis    = quantity × 100 × avgCost（做空为负值）
-marketValue  = quantity × 100 × currentPrice（做空为负值）
-pnl          = marketValue - costBasis（统一公式，无需分支）
+multiplier   = type === "OPTION" ? 100 : Number(security.multiplier || 1)
+costBasis    = quantity × multiplier × avgCost（做空为负值，禁止 Math.abs 翻转）
+marketValue  = quantity × multiplier × currentPrice（做空为负值）
+pnl          = marketValue - costBasis（统一代数公式，做多做空无需任何分支）
 ```
 
 注意：Prisma Decimal 在 Server Component 中 `Number()` 返回 NaN，不能用。改用 `type === "OPTION" ? 100 : 1`。
 
-### FIFO 成本计算
+### FIFO 成本与已实现盈亏
 
-支持双向（做多+做空）：
-- BUY：先关空仓 lots（FIFO），再创建/合并多仓 lots
-- SELL：先关多仓 lots（FIFO），再创建/合并空仓 lots
-- 剩余 lots 的加权平均 = avgCost（每股）
+支持双向（做多+做空）与多倍乘数标的：
+- **佣金分摊**：单笔交易每股佣金分摊必须为 `commission / (quantity × multiplier)`，避免期权将总佣金夸大 100 倍。
+- **BUY**：先平空仓 lots（FIFO，平仓盈亏 `(shortCost - buyPrice) × closeQty × mult`），再创建/合并多仓 lots。
+- **SELL**：先平多仓 lots（FIFO，平仓盈亏 `(sellPrice - longCost) × closeQty × mult`），再创建/合并空仓 lots。
+- **剩余 lots 加权平均** = `avgCost`（每股）。
+- **costBasis** = `quantity × multiplier × avgCost`（保持真实代数符号）。
+
+### 汇率转换与货币换算
+
+统一从 `@/lib/prices/exchange-rate` 导入 `convertCurrency` 与 `getLatestRatesMap`，禁止在各页面局部私有实现。
+
+### TWR 收益率与日快照（剔除出入金）
+
+- **每日投资盈亏**：`dailyPnl = totalValue - prevTotalValue - cashFlow`
+- **时间加权收益率 (TWR)**：`R = ∏(1 + dailyReturn) - 1`
+- **非交易日防护**：周末及美股休市日不写入空快照，避免打断连续净值曲线。
 
 ### Yahoo Finance 符号映射
 

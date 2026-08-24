@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { syncIbkrFlex, parseFlexXml, parseAllDailyPositions, getCashBalance, type IbkrFlexConfig, type FlexReport } from "./flex";
+import { syncIbkrFlex, parseFlexXml, parseAllDailyPositions, parseAllDailySnapshots, getCashBalance, parseCashFlowsByDate, type IbkrFlexConfig, type FlexReport } from "./flex";
 import { mapIbkrExchangeToMarket } from "./flex";
 import { updatePositionsWithFifo } from "./fifo";
 import { getLatestRate } from "@/lib/prices/exchange-rate";
@@ -119,6 +119,7 @@ export async function syncAccountData(accountId: string, force = false): Promise
   await upsertPositions(accountId, report);
   await updatePositionsWithFifo(accountId);
   await storeDailyPositions(accountId, rawXml);
+  await storeDailySnapshotsFromXml(accountId, rawXml, account.currency);
 
   return { trades: tradesCount, positions: report.positions.length, fromCache };
 }
@@ -131,14 +132,81 @@ export async function syncFromCache(accountId: string): Promise<{ trades: number
 
   if (!cached) throw new Error("无缓存数据，请先执行一次 IBKR 同步");
 
+  const account = await db.account.findUnique({ where: { id: accountId } });
   const report = parseFlexXml(cached.xml);
 
   const tradesCount = await upsertTrades(accountId, report);
   await upsertPositions(accountId, report);
   await updatePositionsWithFifo(accountId);
   await storeDailyPositions(accountId, cached.xml);
+  await storeDailySnapshotsFromXml(accountId, cached.xml, account?.currency || "USD");
 
   return { trades: tradesCount, positions: report.positions.length };
+}
+
+export async function storeDailySnapshotsFromXml(accountId: string, xml: string, currency: string) {
+  const snapshots = parseAllDailySnapshots(xml);
+  if (snapshots.length === 0) return;
+
+  snapshots.sort((a, b) => a.date.localeCompare(b.date));
+
+  let prevVal: number | null = null;
+  let peak = new Decimal(0);
+  let maxDrawdown = new Decimal(0);
+
+  for (const s of snapshots) {
+    const parts = s.date.split("-");
+    const date = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
+
+    const totalValue = new Decimal(s.totalValue.toFixed(4));
+    const cashBalance = new Decimal(s.cashBalance.toFixed(4));
+    const positionsValue = new Decimal(s.positionsValue.toFixed(4));
+    let dailyPnl: Prisma.Decimal | undefined = undefined;
+    let dailyReturn: Prisma.Decimal | undefined = undefined;
+
+    if (prevVal !== null) {
+      const prevValDec = new Decimal(prevVal.toFixed(4));
+      const dwDec = new Decimal(s.depositWithdrawals.toFixed(4));
+      dailyPnl = totalValue.sub(prevValDec).sub(dwDec);
+      if (!prevValDec.isZero()) {
+        dailyReturn = dailyPnl.div(prevValDec.abs()).mul(100);
+      }
+    }
+
+    if (totalValue.greaterThan(peak)) peak = totalValue;
+    if (peak.greaterThan(0)) {
+      const dd = peak.sub(totalValue).div(peak).mul(100);
+      if (dd.greaterThan(maxDrawdown)) maxDrawdown = dd;
+    }
+
+    await db.snapshot.upsert({
+      where: {
+        accountId_date: { accountId, date },
+      },
+      update: {
+        totalValue,
+        cashBalance,
+        positionsValue,
+        dailyPnl,
+        dailyReturn,
+        maxDrawdown,
+        currency,
+      },
+      create: {
+        accountId,
+        date,
+        totalValue,
+        cashBalance,
+        positionsValue,
+        dailyPnl,
+        dailyReturn,
+        maxDrawdown,
+        currency,
+      },
+    });
+
+    prevVal = s.totalValue;
+  }
 }
 
 async function storeDailyPositions(accountId: string, xml: string) {
@@ -360,7 +428,8 @@ export async function createDailySnapshot(accountId: string, date: Date) {
       orderBy: { date: "desc" },
     });
 
-    const multiplier = pos.security.multiplier || new Decimal(1);
+    const mult = pos.security.type === "OPTION" ? 100 : Number(pos.security.multiplier || 1);
+    const multiplier = new Decimal(mult);
     const price = latestPrice ? latestPrice.close : pos.avgCost;
     const rawValue = pos.quantity.mul(multiplier).mul(price);
 
@@ -388,6 +457,17 @@ export async function createDailySnapshot(accountId: string, date: Date) {
   }
   const totalValue = positionsValue.add(cashBalance);
 
+  // Check if there was cash flow on this date from latest Flex cache
+  let cashFlowOnDate = new Decimal(0);
+  if (latestCache) {
+    const flows = parseCashFlowsByDate(latestCache.xml);
+    const dateStr = date.toISOString().split("T")[0];
+    const flowAmt = flows.get(dateStr) || 0;
+    if (flowAmt !== 0) {
+      cashFlowOnDate = new Decimal(flowAmt.toFixed(4));
+    }
+  }
+
   const prevSnapshot = await db.snapshot.findFirst({
     where: { accountId, date: { lt: date } },
     orderBy: { date: "desc" },
@@ -396,7 +476,7 @@ export async function createDailySnapshot(accountId: string, date: Date) {
   let dailyPnl = null;
   let dailyReturn = null;
   if (prevSnapshot) {
-    dailyPnl = totalValue.sub(prevSnapshot.totalValue);
+    dailyPnl = totalValue.sub(prevSnapshot.totalValue).sub(cashFlowOnDate);
     if (!prevSnapshot.totalValue.isZero()) {
       dailyReturn = dailyPnl.div(prevSnapshot.totalValue.abs()).mul(100);
     }

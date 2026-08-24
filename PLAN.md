@@ -127,8 +127,30 @@
 - Snapshot prevSnapshot 查询加 `date: { lt: date }`，避免同日重复比较
 
 ### 4.12 Snapshot 现金统一 ✅
-- Dashboard 和 Snapshot 的 `cashBalance` 统一为 0
-- 真实现金数据待 IBKR Flex API 启用 cash balance 字段后从 XML 提取
+- 从 IBKR Flex 每日报告（`<CashReportCurrency currency="BASE_SUMMARY">`）提取真实每日 `endingCash`
+- 消除现金为 0 导致的入金与建仓净值大幅虚假跳变
+
+### 4.13 出入金与时间加权收益率 (TWR) ✅
+- 在 `src/lib/ibkr/flex.ts` 中实现 `parseCashFlowsByDate` 与 `parseAllDailySnapshots`
+- 剔除出入金后的真实投资日盈亏：`dailyPnl = totalValue - prevTotalValue - cashFlow`
+- 月度和年度收益率采用时间加权收益率（TWR）复合：`R = ∏(1 + dailyReturn) - 1`
+- 复盘分析页在月/年标签新增「出入金」StatCard 与明细列表格列
+
+### 4.14 仪表盘仓位比重与盈亏拆分 ✅
+- 仪表盘新增「出入金」StatCard（累计净入金）
+- 总资产卡片展示仓位比重与现金余额
+- 总盈亏卡片拆分列出已实现盈亏（FIFO 确权）与未实现浮动盈亏
+
+### 4.15 持仓管理明确标注未实现盈亏 ✅
+- 持仓管理各市场汇总卡片及持仓表格表头明确标注为「未实现盈亏」
+
+### 4.16 核心计算公式与架构重构优化 ✅
+- FIFO 成本计算修正：期权及非1乘数标的佣金分摊统一为 `comm / (qty * mult)`，避免期权每股成本放大 100 倍
+- 空头 costBasis 符号统一：保留真实代数负值，移除 `Math.abs` 翻转
+- 历史价格时区统一：`fetchHistoricalPrices` 历史日期统一使用 `Date.UTC`，消除 8 小时本地时区偏移
+- 快照期权乘数兜底：`createDailySnapshot` 补充 `pos.security.type === "OPTION" ? 100 : 1` 兜底
+- 汇率转换模块化复用：统一由 `src/lib/prices/exchange-rate.ts` 导出 `convertCurrency` 与 `getLatestRatesMap`，消除三处页面重复代码
+- 调度器非交易日防护：美东时间周末及非交易日跳过空快照生成，保护连续净值序列
 
 ---
 

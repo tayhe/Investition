@@ -3,32 +3,7 @@ import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { formatCurrency } from "@/lib/utils";
 import { getLatestPrices } from "@/lib/prices/cache";
-
-async function getLatestRates(): Promise<Map<string, number>> {
-  const rates = await db.exchangeRate.findMany({
-    orderBy: { date: "desc" },
-  });
-  const map = new Map<string, number>();
-  for (const r of rates) {
-    const key = `${r.baseCurrency}_${r.quoteCurrency}`;
-    if (!map.has(key)) map.set(key, Number(r.rate));
-  }
-  return map;
-}
-
-function convertCurrency(amount: number, from: string, to: string, rates: Map<string, number>): number {
-  if (from === to) return amount;
-  const direct = rates.get(`${from}_${to}`);
-  if (direct) return amount * direct;
-  const inverse = rates.get(`${to}_${from}`);
-  if (inverse && inverse > 0) return amount / inverse;
-  const fromToUsd = from === "USD" ? 1 : (rates.get(`${from}_USD`) ?? (rates.get(`USD_${from}`) ? 1 / rates.get(`USD_${from}`)! : null));
-  const toToUsd = to === "USD" ? 1 : (rates.get(`${to}_USD`) ?? (rates.get(`USD_${to}`) ? 1 / rates.get(`USD_${to}`)! : null));
-  if (fromToUsd !== null && toToUsd !== null && toToUsd > 0) {
-    return (amount * fromToUsd) / toToUsd;
-  }
-  return amount;
-}
+import { convertCurrency, getLatestRatesMap } from "@/lib/prices/exchange-rate";
 
 async function getPortfolioData() {
   const session = await auth();
@@ -51,7 +26,7 @@ async function getPortfolioData() {
   const securityIds = [...new Set(positions.map((p) => p.securityId))];
   const [priceMap, rates] = await Promise.all([
     getLatestPrices(securityIds),
-    getLatestRates(),
+    getLatestRatesMap(),
   ]);
 
   const enriched = positions.map((pos) => {
@@ -136,6 +111,7 @@ export default async function PortfolioPage() {
               <div className="text-sm text-muted">{m.label}持仓</div>
               <div className="text-xl font-bold mt-1">{formatCurrency(m.value, m.currency)}</div>
               <div className={`text-sm mt-1 ${m.pnl >= 0 ? "text-green" : "text-red"}`}>
+                <span className="text-xs text-muted mr-1">未实现</span>
                 {m.pnl >= 0 ? "+" : ""}
                 {formatCurrency(m.pnl, m.currency)}
                 {" "}

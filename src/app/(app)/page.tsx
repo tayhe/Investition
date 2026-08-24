@@ -4,32 +4,9 @@ import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { formatCurrency } from "@/lib/utils";
 import { getLatestPrices } from "@/lib/prices/cache";
-
-async function getLatestRates(): Promise<Map<string, number>> {
-  const rates = await db.exchangeRate.findMany({
-    orderBy: { date: "desc" },
-  });
-  const map = new Map<string, number>();
-  for (const r of rates) {
-    const key = `${r.baseCurrency}_${r.quoteCurrency}`;
-    if (!map.has(key)) map.set(key, Number(r.rate));
-  }
-  return map;
-}
-
-function convertCurrency(amount: number, from: string, to: string, rates: Map<string, number>): number {
-  if (from === to) return amount;
-  const direct = rates.get(`${from}_${to}`);
-  if (direct) return amount * direct;
-  const inverse = rates.get(`${to}_${from}`);
-  if (inverse && inverse > 0) return amount / inverse;
-  const fromToUsd = from === "USD" ? 1 : (rates.get(`${from}_USD`) ?? (rates.get(`USD_${from}`) ? 1 / rates.get(`USD_${from}`)! : null));
-  const toToUsd = to === "USD" ? 1 : (rates.get(`${to}_USD`) ?? (rates.get(`USD_${to}`) ? 1 / rates.get(`USD_${to}`)! : null));
-  if (fromToUsd !== null && toToUsd !== null && toToUsd > 0) {
-    return (amount * fromToUsd) / toToUsd;
-  }
-  return amount;
-}
+import { calculateRealizedPnl } from "@/lib/ibkr/fifo";
+import { parseCashFlowsByDate } from "@/lib/ibkr/flex";
+import { convertCurrency, getLatestRatesMap } from "@/lib/prices/exchange-rate";
 
 async function getDashboardData() {
   const session = await auth();
@@ -46,7 +23,7 @@ async function getDashboardData() {
   const now = new Date();
   const yearStart = new Date(Date.UTC(now.getFullYear(), 0, 1));
 
-  const [positions, snapshots, rates] = await Promise.all([
+  const [positions, snapshots, rates, realizedMap, flexCaches] = await Promise.all([
     db.position.findMany({
       where: { accountId: { in: accountIds }, quantity: { not: 0 } },
       include: { security: true },
@@ -55,7 +32,11 @@ async function getDashboardData() {
       where: { accountId: { in: accountIds }, date: { gte: yearStart } },
       orderBy: { date: "asc" },
     }),
-    getLatestRates(),
+    getLatestRatesMap(),
+    calculateRealizedPnl(accountIds),
+    db.flexCache.findMany({
+      where: { accountId: { in: accountIds } },
+    }),
   ]);
 
   const securityIds = [...new Set(positions.map((p) => p.securityId))];
@@ -79,8 +60,9 @@ async function getDashboardData() {
   }, 0);
 
   const totalValue = positionsValue + cashBalance;
+  const positionRatio = totalValue > 0 ? (positionsValue / totalValue) * 100 : 0;
 
-  const totalPnl = positions.reduce((sum, pos) => {
+  const unrealizedPnl = positions.reduce((sum, pos) => {
     const price = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
     const mult = pos.security.type === "OPTION" ? 100 : Number(pos.security.multiplier || 1);
     const qty = Number(pos.quantity);
@@ -90,6 +72,24 @@ async function getDashboardData() {
     const convertedPnl = convertCurrency(pnl, pos.currency, baseCurrency, rates);
     return sum + convertedPnl;
   }, 0);
+
+  let realizedPnl = 0;
+  for (const [cur, amt] of realizedMap.entries()) {
+    realizedPnl += convertCurrency(amt, cur, baseCurrency, rates);
+  }
+
+  const totalPnl = realizedPnl + unrealizedPnl;
+
+  // Calculate cumulative net deposits (出入金) across accounts
+  let netDeposits = 0;
+  for (const fc of flexCaches) {
+    const flows = parseCashFlowsByDate(fc.xml);
+    const acc = accounts.find((a) => a.id === fc.accountId);
+    const cur = acc?.currency || baseCurrency;
+    for (const amt of flows.values()) {
+      netDeposits += convertCurrency(amt, cur, baseCurrency, rates);
+    }
+  }
 
   // Group snapshots by date across accounts, summing values converted to base currency
   const dateSnapshotMap = new Map<string, number>();
@@ -122,7 +122,12 @@ async function getDashboardData() {
     snapshots: curveData,
     stats: {
       totalValue,
+      positionsValue,
+      positionRatio,
+      netDeposits,
       totalPnl,
+      realizedPnl,
+      unrealizedPnl,
       cashBalance,
       positionCount: positions.length,
       maxDrawdown,
@@ -158,15 +163,21 @@ export default async function Dashboard() {
         <p className="text-muted mt-1">总览你的投资组合表现</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <StatCard
           title="总资产"
           value={formatCurrency(stats.totalValue, stats.currency)}
-          subtitle={`${stats.currency} (含现金 ${formatCurrency(stats.cashBalance, stats.currency)})`}
+          subtitle={`仓位 ${stats.positionRatio.toFixed(1)}% · 现金 ${formatCurrency(stats.cashBalance, stats.currency)}`}
+        />
+        <StatCard
+          title="出入金"
+          value={`${stats.netDeposits >= 0 ? "+" : ""}${formatCurrency(stats.netDeposits, stats.currency)}`}
+          subtitle="累计净入金"
         />
         <StatCard
           title="总盈亏"
-          value={formatCurrency(stats.totalPnl, stats.currency)}
+          value={`${stats.totalPnl >= 0 ? "+" : ""}${formatCurrency(stats.totalPnl, stats.currency)}`}
+          subtitle={`已实现 ${stats.realizedPnl >= 0 ? "+" : ""}${formatCurrency(stats.realizedPnl, stats.currency)} · 未实现 ${stats.unrealizedPnl >= 0 ? "+" : ""}${formatCurrency(stats.unrealizedPnl, stats.currency)}`}
           change={`${stats.totalPnl >= 0 ? "+" : ""}${changePercent.toFixed(2)}%`}
           changePositive={stats.totalPnl >= 0}
         />
