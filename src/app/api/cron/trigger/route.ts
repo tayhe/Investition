@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { fetchPrices } from "@/lib/prices/fetcher";
 import { fetchExchangeRates } from "@/lib/prices/exchange-rate";
-import { createDailySnapshot } from "@/lib/ibkr/sync";
+import { createDailySnapshot } from "@/lib/portfolio/snapshot";
 import { getToday } from "@/lib/utils";
 
 export async function POST(request: NextRequest) {

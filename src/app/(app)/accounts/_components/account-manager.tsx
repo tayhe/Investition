@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { IbkrConfig } from "@/components/ibkr-config";
-import { IbkrSync } from "@/components/ibkr-sync";
-import { XmlImporter } from "@/components/xml-importer";
-import { CsvImporter } from "@/components/csv-importer";
+import { IbkrConfig } from "./ibkr-config";
+import { IbkrSync } from "./ibkr-sync";
+import { XmlImporter } from "./xml-importer";
+import { CsvImporter } from "./csv-importer";
 
 interface Account {
   id: string;

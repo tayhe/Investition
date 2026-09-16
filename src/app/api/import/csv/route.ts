@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { parseCsv } from "@/lib/csv/parser";
 import { updatePositionsWithFifo } from "@/lib/ibkr/fifo";
-import { createDailySnapshot } from "@/lib/ibkr/sync";
+import { createDailySnapshot } from "@/lib/portfolio/snapshot";
 import { getToday } from "@/lib/utils";
 import { Prisma } from "@/generated/prisma/client";
 

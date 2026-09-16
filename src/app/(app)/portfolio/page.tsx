@@ -1,9 +1,10 @@
-import { PositionsTable } from "@/components/positions-table";
+import { PositionsTable } from "./_components/positions-table";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { formatCurrency } from "@/lib/utils";
 import { getLatestPrices } from "@/lib/prices/cache";
 import { convertCurrency, getLatestRatesMap } from "@/lib/prices/exchange-rate";
+import { calculatePositionMetrics } from "@/lib/portfolio/calc";
 
 async function getPortfolioData() {
   const session = await auth();
@@ -30,29 +31,23 @@ async function getPortfolioData() {
   ]);
 
   const enriched = positions.map((pos) => {
-    const currentPrice = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
-    const qty = Number(pos.quantity);
-    const avgCost = Number(pos.avgCost);
-    const multiplier = pos.security.type === "OPTION" ? 100 : Number(pos.security.multiplier || 1);
-    const costBasis = qty * multiplier * avgCost;
-    const marketValue = qty * multiplier * currentPrice;
-    const pnl = marketValue - costBasis;
-    const pnlPercent = Math.abs(costBasis) > 0 ? (pnl / Math.abs(costBasis)) * 100 : 0;
-    const usdMarketValue = convertCurrency(marketValue, pos.currency, "USD", rates);
-    const usdPrice = convertCurrency(currentPrice, pos.currency, "USD", rates);
+    const currentPrice = priceMap.get(pos.securityId);
+    const metrics = calculatePositionMetrics(pos, currentPrice);
+    const usdMarketValue = convertCurrency(metrics.marketValue, pos.currency, "USD", rates);
+    const usdPrice = convertCurrency(metrics.currentPrice, pos.currency, "USD", rates);
 
     return {
       symbol: pos.security.symbol,
       name: pos.security.name,
       market: pos.security.market,
-      quantity: qty,
-      avgCost,
-      currentPrice,
+      quantity: metrics.quantity,
+      avgCost: metrics.avgCost,
+      currentPrice: metrics.currentPrice,
       usdPrice,
-      marketValue,
+      marketValue: metrics.marketValue,
       usdMarketValue,
-      pnl,
-      pnlPercent,
+      pnl: metrics.pnl,
+      pnlPercent: metrics.pnlPercent,
       currency: pos.currency,
     };
   });

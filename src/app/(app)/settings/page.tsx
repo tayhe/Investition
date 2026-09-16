@@ -1,5 +1,5 @@
-import { PriceFetcher } from "@/components/price-fetcher";
-import { CronStatus } from "@/components/cron-status";
+import { PriceFetcher } from "./_components/price-fetcher";
+import { CronStatus } from "./_components/cron-status";
 
 export default function SettingsPage() {
   return (

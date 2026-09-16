@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { syncAccountData, syncFromCache, createDailySnapshot } from "@/lib/ibkr/sync";
+import { syncAccountData, syncFromCache } from "@/lib/ibkr/sync";
+import { createDailySnapshot } from "@/lib/portfolio/snapshot";
 import { getToday } from "@/lib/utils";
 
 export async function POST(request: NextRequest) {

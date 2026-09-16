@@ -1,5 +1,5 @@
 import { StatCard } from "@/components/stat-card";
-import { EquityCurve } from "@/components/equity-curve";
+import { EquityCurve } from "./_components/equity-curve";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { formatCurrency } from "@/lib/utils";
@@ -7,6 +7,7 @@ import { getLatestPrices } from "@/lib/prices/cache";
 import { calculateRealizedPnl } from "@/lib/ibkr/fifo";
 import { parseCashFlowsByDate } from "@/lib/ibkr/flex";
 import { convertCurrency, getLatestRatesMap } from "@/lib/prices/exchange-rate";
+import { calculatePositionMetrics } from "@/lib/portfolio/calc";
 
 async function getDashboardData() {
   const session = await auth();
@@ -51,27 +52,17 @@ async function getDashboardData() {
     return sum + convertCurrency(s.cashBalance, s.currency, baseCurrency, rates);
   }, 0);
 
-  const positionsValue = positions.reduce((sum, pos) => {
-    const price = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
-    const mult = pos.security.type === "OPTION" ? 100 : Number(pos.security.multiplier || 1);
-    const posVal = Number(pos.quantity) * mult * price;
-    const convertedVal = convertCurrency(posVal, pos.currency, baseCurrency, rates);
-    return sum + convertedVal;
-  }, 0);
+  let positionsValue = 0;
+  let unrealizedPnl = 0;
+  for (const pos of positions) {
+    const price = priceMap.get(pos.securityId);
+    const metrics = calculatePositionMetrics(pos, price);
+    positionsValue += convertCurrency(metrics.marketValue, pos.currency, baseCurrency, rates);
+    unrealizedPnl += convertCurrency(metrics.pnl, pos.currency, baseCurrency, rates);
+  }
 
   const totalValue = positionsValue + cashBalance;
   const positionRatio = totalValue > 0 ? (positionsValue / totalValue) * 100 : 0;
-
-  const unrealizedPnl = positions.reduce((sum, pos) => {
-    const price = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
-    const mult = pos.security.type === "OPTION" ? 100 : Number(pos.security.multiplier || 1);
-    const qty = Number(pos.quantity);
-    const cost = qty * mult * Number(pos.avgCost);
-    const mv = qty * mult * price;
-    const pnl = mv - cost;
-    const convertedPnl = convertCurrency(pnl, pos.currency, baseCurrency, rates);
-    return sum + convertedPnl;
-  }, 0);
 
   let realizedPnl = 0;
   for (const [cur, amt] of realizedMap.entries()) {

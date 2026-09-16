@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { getLatestPrices } from "@/lib/prices/cache";
 import { parseCashFlowsByDate } from "@/lib/ibkr/flex";
 import { convertCurrency, getLatestRatesMap } from "@/lib/prices/exchange-rate";
-import { AnalyticsCharts } from "./analytics-charts";
+import { AnalyticsCharts } from "./_components/analytics-charts";
 
 async function getAnalyticsData() {
   const session = await auth();

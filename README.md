@@ -113,12 +113,13 @@ src/
 │   │   └── settings/             # 设置
 │   ├── login/                    # 登录
 │   └── api/                      # REST API
-├── components/                   # UI 组件
+├── components/                   # 全局共享 UI 组件（Sidebar, StatCard, ThemeToggle）
 ├── lib/
 │   ├── db.ts                     # Prisma 客户端
 │   ├── auth.ts                   # NextAuth（Edge-safe）
 │   ├── auth-providers.ts         # NextAuth（完整）
 │   ├── scheduler.ts              # 定时任务
+│   ├── portfolio/                # 组合级通用计算与快照
 │   ├── prices/                   # 价格和汇率
 │   ├── csv/                      # CSV 解析
 │   └── ibkr/                     # IBKR 集成

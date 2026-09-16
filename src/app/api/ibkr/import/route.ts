@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { parseFlexXml } from "@/lib/ibkr/flex";
-import { upsertTrades, upsertPositions, createDailySnapshot } from "@/lib/ibkr/sync";
+import { upsertTrades, upsertPositions } from "@/lib/ibkr/sync";
+import { createDailySnapshot } from "@/lib/portfolio/snapshot";
 import { getToday } from "@/lib/utils";
 
 export async function POST(request: NextRequest) {

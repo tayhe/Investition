@@ -1,4 +1,4 @@
-import { AccountManager } from "@/components/account-manager";
+import { AccountManager } from "./_components/account-manager";
 
 export default function AccountsPage() {
   return (

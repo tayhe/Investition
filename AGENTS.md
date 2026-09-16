@@ -150,27 +150,29 @@ pnl          = marketValue - costBasis（统一代数公式，做多做空无需
 src/
 ├── app/
 │   ├── (app)/                    # 认证保护的页面（有侧边栏）
+│   │   ├── _components/          # 仪表盘专属组件（EquityCurve）
 │   │   ├── layout.tsx            # 侧边栏 + SessionProvider + auth 检查
 │   │   ├── page.tsx              # 仪表盘
-│   │   ├── portfolio/            # 持仓管理
+│   │   ├── portfolio/            # 持仓管理（_components/ 含 PositionsTable）
 │   │   ├── transactions/         # 交易记录
-│   │   ├── analytics/            # 复盘分析
-│   │   ├── accounts/             # 账户管理
-│   │   └── settings/             # 设置
+│   │   ├── analytics/            # 复盘分析（_components/ 含 AnalyticsCharts）
+│   │   ├── accounts/             # 账户管理（_components/ 含 AccountManager 等）
+│   │   └── settings/             # 设置（_components/ 含 PriceFetcher, CronStatus）
 │   ├── login/                    # 登录（独立布局，无侧边栏）
 │   ├── auth-provider.tsx         # SessionProvider 封装
 │   ├── layout.tsx                # 根布局（最小化）
 │   └── api/                      # REST API
-├── components/                   # UI 组件
+├── components/                   # 全局共享 UI 组件（Sidebar, StatCard, ThemeToggle）
 ├── lib/
 │   ├── db.ts                     # Prisma 客户端单例
 │   ├── auth.ts                   # NextAuth（Edge-safe）
 │   ├── auth-providers.ts         # NextAuth（完整）
 │   ├── scheduler.ts              # 定时任务调度器
 │   ├── utils.ts                  # 工具函数（含 getToday()）
+│   ├── portfolio/                # 组合级通用计算与快照（calc.ts, snapshot.ts）
 │   ├── prices/                   # 价格和汇率
 │   ├── csv/                      # CSV 解析
-│   └── ibkr/                     # IBKR 集成
+│   └── ibkr/                     # IBKR 集成（协议、XML 解析、FIFO 同步）
 ├── generated/prisma/             # Prisma 自动生成（不要修改）
 └── instrumentation.ts            # 启动调度器
 prisma/

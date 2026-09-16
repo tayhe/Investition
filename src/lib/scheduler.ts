@@ -2,7 +2,8 @@ import cron from "node-cron";
 import { db } from "@/lib/db";
 import { fetchPrices } from "@/lib/prices/fetcher";
 import { fetchExchangeRates } from "@/lib/prices/exchange-rate";
-import { createDailySnapshot, syncAccountData } from "@/lib/ibkr/sync";
+import { syncAccountData } from "@/lib/ibkr/sync";
+import { createDailySnapshot } from "@/lib/portfolio/snapshot";
 import { getToday } from "@/lib/utils";
 
 let started = false;

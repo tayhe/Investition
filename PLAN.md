@@ -152,6 +152,14 @@
 - 汇率转换模块化复用：统一由 `src/lib/prices/exchange-rate.ts` 导出 `convertCurrency` 与 `getLatestRatesMap`，消除三处页面重复代码
 - 调度器非交易日防护：美东时间周末及非交易日跳过空快照生成，保护连续净值序列
 
+### 4.17 架构与文件组织优化 ✅
+- 清理废弃且无鉴权的冗余 API 路由（`api/positions`, `api/trades`, `api/snapshots`），消除越权与死代码风险
+- 彻底修复 `sync.ts` 中 `costBasis` 的 `Math.abs` 历史遗留，统一做空代数负值
+- 抽离通用组合模块 `src/lib/portfolio/`：
+  - `calc.ts`：纯函数统一持仓乘数、市值、成本、盈亏与盈亏率代数计算
+  - `snapshot.ts`：通用资产快照与回撤计算（解耦对 IBKR 券商逻辑的反向依赖，价格并发查询优化）
+- 组件结构按 Next.js 规范就近收敛：页面私有组件放入对应路由 `_components/`，`src/components/` 仅保留全局通用 UI 组件（Sidebar, StatCard, ThemeToggle）
+
 ---
 
 ## 五、待完成工作
@@ -264,13 +272,14 @@ npx prisma db seed   # 运行种子数据
 src/
 ├── app/
 │   ├── (app)/                    # 认证保护的页面（有侧边栏）
+│   │   ├── _components/          # 仪表盘专属组件（EquityCurve）
 │   │   ├── layout.tsx            # 侧边栏 + SessionProvider + auth 检查
 │   │   ├── page.tsx              # 仪表盘
-│   │   ├── portfolio/            # 持仓管理
+│   │   ├── portfolio/            # 持仓管理（_components/ 含 PositionsTable）
 │   │   ├── transactions/         # 交易记录
-│   │   ├── analytics/            # 复盘分析（月度收益明细）
-│   │   ├── accounts/             # 账户管理（券商集成 + 数据导入）
-│   │   └── settings/             # 设置（行情数据 + 定时任务）
+│   │   ├── analytics/            # 复盘分析（_components/ 含 AnalyticsCharts）
+│   │   ├── accounts/             # 账户管理（_components/ 含 AccountManager 等）
+│   │   └── settings/             # 设置（_components/ 含 PriceFetcher, CronStatus）
 │   ├── login/                    # 登录（独立布局，无侧边栏）
 │   ├── auth-provider.tsx         # SessionProvider 封装
 │   ├── layout.tsx                # 根布局（最小化）
@@ -281,29 +290,15 @@ src/
 │       ├── import/csv/           # CSV 导入
 │       ├── prices/               # 价格获取触发
 │       ├── cron/trigger/         # 手动触发定时任务
-│       ├── sync/                 # IBKR 同步触发
-│       ├── positions/            # 持仓 API
-│       ├── trades/               # 交易 API
-│       └── snapshots/            # 快照 API
-├── components/                   # UI 组件
-│   ├── sidebar.tsx               # 侧边栏（含暗色模式切换 + 退出登录）
-│   ├── account-manager.tsx       # 账户管理（CRUD + 展开 + 重命名 + 券商集成）
-│   ├── ibkr-config.tsx           # IBKR Token 配置
-│   ├── ibkr-sync.tsx             # IBKR 同步按钮（含冷却倒计时）
-│   ├── csv-importer.tsx          # CSV 文件导入
-│   ├── xml-importer.tsx          # IBKR Flex XML 导入
-│   ├── price-fetcher.tsx         # 价格获取按钮
-│   ├── cron-status.tsx           # 定时任务状态和手动触发
-│   ├── theme-toggle.tsx          # 暗色模式切换
-│   ├── stat-card.tsx             # 统计卡片
-│   ├── equity-curve.tsx          # 权益曲线
-│   └── positions-table.tsx       # 持仓表格
+│       └── sync/                 # IBKR 同步触发
+├── components/                   # 全局共享 UI 组件（Sidebar, StatCard, ThemeToggle）
 ├── lib/
 │   ├── db.ts                     # Prisma 客户端单例
 │   ├── auth.ts                   # NextAuth（Edge-safe，无 Prisma）
 │   ├── auth-providers.ts         # NextAuth（完整，含 Credentials Provider）
 │   ├── scheduler.ts              # 定时任务调度器
 │   ├── utils.ts                  # 工具函数
+│   ├── portfolio/                # 组合级通用计算与快照（calc.ts, snapshot.ts）
 │   ├── prices/
 │   │   ├── cache.ts              # 批量价格查询（消除 N+1）
 │   │   ├── fetcher.ts            # Yahoo Finance 价格获取
@@ -312,7 +307,8 @@ src/
 │   │   └── parser.ts             # CSV 解析（Schwab/IBKR/通用格式）
 │   └── ibkr/
 │       ├── flex.ts               # IBKR Flex API + XML 解析
-│       └── sync.ts               # 数据同步 + 快照生成
+│       ├── fifo.ts               # FIFO 成本与已实现盈亏
+│       └── sync.ts               # 数据拉取与持久化
 ├── generated/prisma/             # Prisma 自动生成（不要修改）
 └── instrumentation.ts            # Next.js instrumentation（启动调度器）
 prisma/
