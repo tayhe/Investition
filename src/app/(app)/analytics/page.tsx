@@ -4,6 +4,7 @@ import { getLatestPrices } from "@/lib/prices/cache";
 import { parseCashFlowsByDate } from "@/lib/ibkr/flex";
 import { convertCurrency, getLatestRatesMap } from "@/lib/prices/exchange-rate";
 import { AnalyticsCharts } from "./_components/analytics-charts";
+import { calculatePositionMetrics } from "@/lib/portfolio/calc";
 
 async function getAnalyticsData() {
   const session = await auth();
@@ -47,13 +48,9 @@ async function getAnalyticsData() {
   // Current position P&L ranking (USD)
   const positionRanking = positions
     .map((pos) => {
-      const price = priceMap.get(pos.securityId) ?? Number(pos.avgCost);
-      const mult = pos.security.type === "OPTION" ? 100 : Number(pos.security.multiplier || 1);
-      const qty = Number(pos.quantity);
-      const costBasis = qty * mult * Number(pos.avgCost);
-      const marketValue = qty * mult * price;
-      const pnl = marketValue - costBasis;
-      const usdPnl = convertCurrency(pnl, pos.currency, "USD", rates);
+      const price = priceMap.get(pos.securityId);
+      const metrics = calculatePositionMetrics(pos, price);
+      const usdPnl = convertCurrency(metrics.pnl, pos.currency, "USD", rates);
       return {
         symbol: pos.security.symbol,
         name: pos.security.name,

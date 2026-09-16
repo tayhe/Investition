@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
+import { getMultiplier, calculateCostBasis } from "@/lib/portfolio/calc";
 
 interface Lot {
   quantity: number;
@@ -31,7 +32,7 @@ export async function calculateFifoCostBasis(
     const secId = trade.securityId;
     if (!lotsMap.has(secId)) {
       lotsMap.set(secId, []);
-      const mult = trade.security.type === "OPTION" ? 100 : Number(trade.security.multiplier || 1);
+      const mult = getMultiplier(trade.security);
       securityInfoMap.set(secId, { symbol: trade.security.symbol, multiplier: mult });
     }
 
@@ -39,7 +40,7 @@ export async function calculateFifoCostBasis(
     const qty = Math.abs(Number(trade.quantity));
     if (qty === 0) continue;
 
-    const mult = trade.security.type === "OPTION" ? 100 : Number(trade.security.multiplier || 1);
+    const mult = getMultiplier(trade.security);
     const rawPrice = Number(trade.price);
     const comm = trade.commission ? Math.abs(Number(trade.commission)) : 0;
     const commPerUnit = (qty * mult) > 0 ? comm / (qty * mult) : 0;
@@ -161,8 +162,7 @@ export async function updatePositionsWithFifo(accountId: string) {
 
     if (fifo && fifo.avgCost > 0) {
       const currentAvg = Number(pos.avgCost);
-      const mult = pos.security.type === "OPTION" ? 100 : Number(pos.security.multiplier || 1);
-      const newCostBasis = Number(pos.quantity) * mult * fifo.avgCost;
+      const newCostBasis = calculateCostBasis(pos.quantity, fifo.avgCost, pos.security);
 
       if (Math.abs(currentAvg - fifo.avgCost) > 0.0001 || Math.abs(Number(pos.costBasis) - newCostBasis) > 0.01) {
         await db.position.update({
@@ -207,7 +207,7 @@ export async function calculateRealizedPnl(
     const qty = Math.abs(Number(trade.quantity));
     if (qty === 0) continue;
 
-    const mult = trade.security.type === "OPTION" ? 100 : Number(trade.security.multiplier || 1);
+    const mult = getMultiplier(trade.security);
     const rawPrice = Number(trade.price);
     const comm = trade.commission ? Math.abs(Number(trade.commission)) : 0;
     const commPerUnit = (qty * mult) > 0 ? comm / (qty * mult) : 0;

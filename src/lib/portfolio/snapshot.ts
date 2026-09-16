@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import { getLatestRatesMap, convertCurrency } from "@/lib/prices/exchange-rate";
 import { parseFlexXml, getCashBalance, parseCashFlowsByDate } from "@/lib/ibkr/flex";
+import { calculatePositionMetrics } from "./calc";
 
 const { Decimal } = Prisma;
 
@@ -32,14 +33,8 @@ export async function createDailySnapshot(accountId: string, date: Date) {
   let positionsValue = new Decimal(0);
   for (const pos of positions) {
     const currentPrice = priceMap.get(pos.securityId);
-    const mult =
-      pos.security.type === "OPTION" ? 100 : Number(pos.security.multiplier || 1);
-    const multiplier = new Decimal(mult);
-    const price =
-      currentPrice !== null && currentPrice !== undefined
-        ? new Decimal(currentPrice.toString())
-        : pos.avgCost;
-    const rawValue = pos.quantity.mul(multiplier).mul(price);
+    const metrics = calculatePositionMetrics(pos, currentPrice);
+    const rawValue = new Decimal(metrics.marketValue.toFixed(4));
 
     // Convert to account base currency using cached rates
     const rate = convertCurrency(1, pos.currency, account.currency, rates);

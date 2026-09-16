@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { syncIbkrFlex, parseFlexXml, parseAllDailyPositions, parseAllDailySnapshots, type IbkrFlexConfig, type FlexReport } from "./flex";
 import { mapIbkrExchangeToMarket } from "./flex";
 import { updatePositionsWithFifo } from "./fifo";
+import { calculateCostBasis, getMultiplier } from "@/lib/portfolio/calc";
 import { Prisma } from "@/generated/prisma/client";
 
 const { Decimal } = Prisma;
@@ -251,7 +252,7 @@ async function storeDailyPositions(accountId: string, xml: string) {
 async function getOrCreateSecurity(ibkrSymbol: string, exchange: string, description: string, currency: string, assetClass?: string, multiplier?: number) {
   const market = mapIbkrExchangeToMarket(exchange);
   const type = mapIbkrAssetClass(assetClass || "STK");
-  const mult = multiplier ?? (type === "OPTION" ? 100 : 1);
+  const mult = getMultiplier({ type, multiplier });
 
   const existing = await db.security.findUnique({
     where: { symbol_exchange: { symbol: ibkrSymbol, exchange } },
@@ -367,8 +368,7 @@ export async function upsertPositions(accountId: string, report: FlexReport) {
 
     activeSecurityIds.add(security.id);
 
-    const mult = Number(security.multiplier) || (security.type === "OPTION" ? 100 : 1);
-    const costBasis = pos.quantity * mult * pos.averageCost;
+    const costBasis = calculateCostBasis(pos.quantity, pos.averageCost, security);
 
     await db.position.upsert({
       where: {
