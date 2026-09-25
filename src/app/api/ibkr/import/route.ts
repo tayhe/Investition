@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { parseFlexXml } from "@/lib/ibkr/flex";
-import { upsertTrades, upsertPositions } from "@/lib/ibkr/sync";
+import {
+  upsertTrades,
+  upsertPositions,
+  updatePositionsWithFifo,
+  storeDailyPositions,
+  storeDailySnapshotsFromXml,
+} from "@/lib/ibkr/sync";
 import { createDailySnapshot } from "@/lib/portfolio/snapshot";
 import { getToday } from "@/lib/utils";
 
@@ -57,6 +63,9 @@ export async function POST(request: NextRequest) {
 
     const tradesCount = await upsertTrades(account.id, report);
     await upsertPositions(account.id, report);
+    await updatePositionsWithFifo(account.id);
+    await storeDailyPositions(account.id, xml);
+    await storeDailySnapshotsFromXml(account.id, xml, account.currency || "USD");
     await createDailySnapshot(account.id, getToday());
 
     return NextResponse.json({

@@ -55,6 +55,11 @@ export async function POST(request: NextRequest) {
       let security = await db.security.findUnique({
         where: { symbol_exchange: { symbol: trade.symbol, exchange } },
       });
+      if (!security) {
+        security = await db.security.findFirst({
+          where: { symbol: trade.symbol },
+        });
+      }
 
       if (!security) {
         security = await db.security.create({
@@ -97,6 +102,11 @@ export async function POST(request: NextRequest) {
       let security = await db.security.findUnique({
         where: { symbol_exchange: { symbol: pos.symbol, exchange } },
       });
+      if (!security) {
+        security = await db.security.findFirst({
+          where: { symbol: pos.symbol },
+        });
+      }
 
       if (!security) {
         security = await db.security.create({
@@ -112,7 +122,7 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      const totalCostBasis = pos.price * Math.abs(pos.quantity) * mult;
+      const totalCostBasis = pos.quantity * mult * pos.price;
 
       await db.position.upsert({
         where: {

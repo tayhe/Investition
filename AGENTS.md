@@ -102,6 +102,13 @@ const xmlToParse = lastStatementIdx >= 0 ? xml.slice(lastStatementIdx) : xml;
 - `costBasisPrice` 可能为 0（Flex Query 未配置成本字段时）
 - 多 statement 中同一交易会重复（commission 正负不同），需按 `ibOrderID + side + qty + price` 去重
 - FlexCache 年份从 XML `fromDate` 提取，不依赖系统时间
+- **多币种折算**：必须优先使用 `attrs.positionValueInBase || attrs.positionValue` 提取市值，确保外币资产（如瑞典股 SEK）以基准货币折算金额计入日持仓和快照，禁止混用名义外币市值
+- **完整同步流水线**：无论从 API 自动同步、FlexCache 降级重放还是手动 XML 导入，都必须完整执行 5 步流水线（`upsertTrades` → `upsertPositions` → `updatePositionsWithFifo` → `storeDailyPositions` → `storeDailySnapshotsFromXml` → `createDailySnapshot`），禁止遗漏 FIFO 成本重算或历史日持仓入库
+
+### 标的识别与交易所归一化 (listingExchange)
+
+- **交易所字段**：IBKR 成交记录中的 `exchange` 常为路由/暗池（`DRCTEDGE`, `IBKRATS`），而标的主数据与持仓记录使用的是主上市交易所 `listingExchange`（如 `NASDAQ`）。解析与写入一律优先 `t.listingExchange || t.exchange || ""`。
+- **标的查询降级**：通过 `symbol_exchange` 查询 Security 不存在时，必须降级使用 `symbol` 查询（`findFirst({ where: { symbol } })`），避免为同一标的创建多条 Security 记录导致 FIFO 买卖队列分裂。
 
 ### 期权与做空计算
 
@@ -131,16 +138,26 @@ pnl          = marketValue - costBasis（统一代数公式，做多做空无需
 
 统一从 `@/lib/prices/exchange-rate` 导入 `convertCurrency` 与 `getLatestRatesMap`，禁止在各页面局部私有实现。
 
-### TWR 收益率与日快照（剔除出入金）
+### 收益率核算与复盘归因体系
 
-- **每日投资盈亏**：`dailyPnl = totalValue - prevTotalValue - cashFlow`
-- **时间加权收益率 (TWR)**：`R = ∏(1 + dailyReturn) - 1`
+- **本金与总盈亏**：
+  - `年内总本金 = 期初资产 + 净入金`
+  - `今年总盈亏 = 当前资产 - 年内总本金`
+  - `简单收益率 = 今年总盈亏 / 年内总本金`
+  - `时间加权收益率 (TWR) = ∏(1 + dailyReturn) - 1`（每日剔除出入金：`dailyPnl = totalValue - prevTotalValue - cashFlow`）
+- **复盘分析「标的盈亏排行」**：
+  - 分类切换：支持 `全部 / 盈利榜 / 亏损榜` Tab，移除硬编码 `slice(0, 15)` 截断。
+  - 核心指标明确区分：
+    1. 标的当日涨跌幅 `%` = `(currentPrice - prevPrice) / prevPrice * 100`（无昨日价时视为当日新开仓）
+    2. 标的当日盈亏额 `$` = `dailyPnl`
+    3. 组合贡献度 `拉动 ±X.XX%` = `dailyPnl / prevPortfolioTotalValue * 100`（各标的拉动率求和严格等于当日组合投资收益率）
 - **非交易日防护**：周末及美股休市日不写入空快照，避免打断连续净值曲线。
 
 ### 标的历史交易抽屉与 Trades API
 
 - **接口**：`GET /api/trades?symbol=&year=`，严格按 session 用户所属账户隔离，年份默认使用 `getToday().getUTCFullYear()`，按 `executedAt: "desc"` 排序。
 - **抽屉组件**：`TradeHistoryDrawer`，突出显示买入/卖出均价，次行显示数量，根据标的类型（`securityType`）自动匹配单位（股票/ETF 为「股」，期权/期货为「手」，基金为「份」，债券为「张」）。
+- **成交均价计算**：买入/卖出均价必须按加权单价计算：`sum(price * quantity) / sum(quantity)`，严禁使用 `sum(amount) / sum(quantity)`（期权等乘数标的会因 amount 包含 100 倍乘数导致均价被放大 100 倍）。
 
 ### Yahoo Finance 符号映射
 
@@ -198,13 +215,16 @@ prisma/
 
 - ✅ 数据库迁移完成，所有页面接入真实数据
 - ✅ 登录/登出 + 路由保护
-- ✅ IBKR Flex 同步（API + XML 导入 + 缓存降级 + 每日定时同步）
+- ✅ IBKR Flex 同步（API + XML 导入 + 缓存降级 + 每日定时同步 + 完整5步流水线）
+- ✅ 标的交易所归一化（listingExchange 优先 + symbol 兜底防分裂）
+- ✅ 收益率体系重构（年内总本金/简单收益率/TWR 规范核算）
+- ✅ 复盘分析标的排行（涨跌幅、盈亏额、组合贡献度拉动率三重视角，分类 Tab，无截断）
 - ✅ Yahoo Finance 价格获取（含符号映射）
 - ✅ 定时任务（价格/汇率/快照/IBKR 同步）
 - ✅ CSV 导入（Schwab/IBKR/通用）
 - ✅ 暗色模式 + 账户管理
 - ✅ NY 时区统一（getToday()）
-- ✅ 持仓标的历史成交抽屉（点击查看年度买卖记录、均价/股数统计、标的类型单位自适应）
+- ✅ 持仓标的历史成交抽屉（点击查看年度买卖记录、加权均价/股数统计、标的类型单位自适应）
 - ❌ 无注册页面
 - ❌ 无 Schwab API 集成
 

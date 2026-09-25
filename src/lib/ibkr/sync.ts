@@ -209,7 +209,7 @@ export async function storeDailySnapshotsFromXml(accountId: string, xml: string,
   }
 }
 
-async function storeDailyPositions(accountId: string, xml: string) {
+export async function storeDailyPositions(accountId: string, xml: string) {
   const dailyData = parseAllDailyPositions(xml);
   if (dailyData.length === 0) return;
 
@@ -431,4 +431,5 @@ export async function upsertPositions(accountId: string, report: FlexReport) {
   }
 }
 
+export { updatePositionsWithFifo } from "./fifo";
 export { createDailySnapshot } from "@/lib/portfolio/snapshot";

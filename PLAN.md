@@ -1,7 +1,7 @@
 # Investition — 项目计划与开发路线图
 
 > 本文档供服务器端 MiMo Code Agent 接手后续开发和部署使用。
-> 最后更新: 2026-09-25
+> 最后更新: 2026-09-26
 
 ---
 
@@ -167,6 +167,17 @@
   - 顶部卡片视觉层级突出买入/卖出「均价」（大字粗体），次行显示「共 X 股/手」累计数量
   - 根据标的类型（`securityType`）自动匹配精准数量单位（股票/ETF 为股，期权/期货为手，基金为份，债券为张）
 - 逐笔流水与多年度切换：支持近三年快速切换，时间线展示每笔时间、方向、数量、单价、总额及手续费，支持 ESC 与遮罩快捷退出
+
+### 4.19 标的归一化、收益率体系修正与复盘归因重构 ✅
+- **标的交易所归一化与防拆分**：IBKR 交易与持仓优先采用 `listingExchange`，标的查询在 `symbol_exchange` 未匹配时降级查找已有标的（`symbol`），合并存量碎片标的（如 SNDK 在 NASDAQ 与 DRCTEDGE 的分裂），解决多交易所导致 FIFO 队列割裂和均价失真的问题。
+- **基准货币多币种估值修复**：在 IBKR Flex XML 日持仓解析中，优先使用 `positionValueInBase` 折算基准货币市值（USD），杜绝瑞典股（SEK）等外币资产按名义面值计算导致的快照和日持仓估值严重失真。
+- **仪表盘收益率体系与本金核算厘清**：明确 `年内总本金 = 期初本金 + 净入金`，`今年总盈亏 = 当前资产 - 年内总本金`，并列展示简单收益率与 TWR 时间加权收益率，统一文字与高亮样式。
+- **复盘分析「标的盈亏排行」彻底重构**：
+  - 增加 `全部 / 盈利榜 / 亏损榜` 分类 Tab，移除 `slice(0, 15)` 硬编码截断。
+  - 三重指标维度：标的当日涨跌幅 `%`（个股表现）、当日盈亏额 `$`、组合贡献度 `拉动 ±X.XX%`（`dailyPnl / prevPortfolioTotalValue * 100`，所有标的拉动率求和严格等于组合当日投资收益率，提供标准 Brinson 风格归因）。
+- **标的历史交易抽屉期权加权均价修复**：修正买卖均价计算公式为加权单价 `sum(price * qty) / sum(qty)`，解决期权乘数（100x）导致均价被放大 100 倍的问题。
+- **全项目做空成本代数负值一致性**：修正 `calculateFifoCostBasis` 和 CSV 导入中空头总成本为代数负值 `quantity * multiplier * avgCost`，消除潜在正负符号混乱。
+- **手动 XML 导入流水线对齐**：补齐 `updatePositionsWithFifo`、`storeDailyPositions` 和 `storeDailySnapshotsFromXml`，确保手动导入与自动同步享受完全一致的完整 5 步数据处理流水线。
 
 ---
 
@@ -351,6 +362,11 @@ prisma/
 20. **Snapshot 价格截止日**: `createDailySnapshot` 中 Price 查询必须加 `date: { lte: date }`，否则会用未来日期的价格，导致历史 snapshot 值错误
 21. **prevSnapshot 严格小于当前日**: 必须 `date: { lt: date }` 而非任意 `date desc`，否则同日重复生成 snapshot 时会与自己比较，dailyPnl = 0
 22. **IBKR 定时同步策略**: 每日 00:30 NY 时间强制拉取一次（`force=true` 绕过 15 分钟冷却期），其他时间通过手动按钮触发并受冷却期保护
+23. **标的交易所归一化 (listingExchange)**: IBKR 交易记录中的 `exchange` 经常是执行路由或暗池（`DRCTEDGE`, `IBKRATS`），而标的主数据与持仓记录为上市交易所 `listingExchange`（如 `NASDAQ`）。解析写入优先采用 `listingExchange`，查询采用 `symbol_exchange` 兜底 `symbol`，防止标的被割裂成多份破坏 FIFO 队列
+24. **IBKR Flex XML 基础货币估值**: 日持仓和快照必须优先采用 `positionValueInBase`，避免外币计价标的（如瑞典股 SEK）直接按名义数量×单价混入 USD 基准账户导致市值严重虚增
+25. **期权加权均价计算**: `TradeHistoryDrawer` 买卖均价必须采用 `sum(price * quantity) / sum(quantity)` 加权单价计算，避免使用 `sum(amount) / sum(quantity)` 导致均价被乘数（100x）放大 100 倍
+26. **复盘归因与拉动率一致性**: 复盘分析中个股对组合的拉动率定义为 `dailyPnl / prevPortfolioTotalValue * 100`，严格保证个股拉动率之和等于组合日收益率，并提供 `全部 / 盈利榜 / 亏损榜` 分类展示
+27. **数据同步流水线对齐**: 无论是定时同步、手动触发还是 XML 文件上传导入，均保证严格执行 5 步流水线（交易记录、当前持仓、FIFO 成本重算、每日持仓历史、每日快照历史），消除数据一致性差异
 
 ---
 
@@ -373,3 +389,5 @@ prisma/
 15. **期权乘数**: 美股期权 1 手 = 100 股，市值 = quantity × 100 × optionPrice
 16. **跨时区日期错位**: 服务器在 UTC+8（中国时间），美股交易日为 `America/New_York` 时区。所有日期写入数据库时必须用 `getToday()`（基于 NY 时区），否则 6/24 凌晨跑价格更新时，Price 表日期会标为 6/24 但实际抓取的是 6/23 收盘价，导致 Price/Snapshot/DailyPosition 日期不一致，dailyPnl 偏差
 17. **MiMoCode subagent 模型**: 配置文件 `~/.config/mimocode/mimocode.json` 中 subagent 的 `model` 字段必须使用 `mimo models` 列表中存在的完整 provider 前缀。`minimax-cn/MiniMax-M3` 不可用，正确写法是 `minimax-cn-coding-plan/MiniMax-M3`（漏写 `-coding-plan` 会触发 ProviderModelNotFoundError）
+18. **标的多交易所拆分风险**: 如果未按 `listingExchange` 归一化或缺少 `symbol` 兜底查询，同一标的可能在 Security 表中生成多条记录，导致买卖交易进入不同队列，破坏 FIFO 成本计算与持仓聚合
+19. **外币标的名义市值污染**: IBKR XML 中的 `positionValue` 为标的原币种市值，若未取 `positionValueInBase` 会导致日持仓和快照总额混入外币（例如 1 SEK 当作 1 USD），引起净值异常激增

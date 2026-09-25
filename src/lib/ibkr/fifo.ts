@@ -126,7 +126,7 @@ export async function calculateFifoCostBasis(
     } else if (netQty < 0 && shortLots.length > 0) {
       const totalCost = shortLots.reduce((sum, l) => sum + l.quantity * l.costPerUnit, 0);
       const avgCost = totalCost / shortQty;
-      const totalCostBasis = totalCost * info.multiplier;
+      const totalCostBasis = netQty * info.multiplier * avgCost;
       result.set(secId, {
         securityId: secId,
         symbol: info.symbol,

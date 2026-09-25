@@ -120,6 +120,8 @@ export function TradeHistoryDrawer({
     let sellCount = 0;
     let sellQty = 0;
     let sellAmount = 0;
+    let buyWeightedPriceSum = 0;
+    let sellWeightedPriceSum = 0;
     let totalCommission = 0;
 
     for (const t of trades) {
@@ -128,15 +130,17 @@ export function TradeHistoryDrawer({
         buyCount += 1;
         buyQty += t.quantity;
         buyAmount += t.amount;
+        buyWeightedPriceSum += t.price * t.quantity;
       } else {
         sellCount += 1;
         sellQty += t.quantity;
         sellAmount += t.amount;
+        sellWeightedPriceSum += t.price * t.quantity;
       }
     }
 
-    const buyAvgPrice = buyQty > 0 ? buyAmount / buyQty : 0;
-    const sellAvgPrice = sellQty > 0 ? sellAmount / sellQty : 0;
+    const buyAvgPrice = buyQty > 0 ? buyWeightedPriceSum / buyQty : 0;
+    const sellAvgPrice = sellQty > 0 ? sellWeightedPriceSum / sellQty : 0;
 
     return {
       buyCount,
