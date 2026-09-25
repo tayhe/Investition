@@ -214,9 +214,14 @@ async function storeDailyPositions(accountId: string, xml: string) {
   if (dailyData.length === 0) return;
 
   for (const dp of dailyData) {
-    const security = await db.security.findUnique({
+    let security = await db.security.findUnique({
       where: { symbol_exchange: { symbol: dp.symbol, exchange: dp.exchange } },
     });
+    if (!security) {
+      security = await db.security.findFirst({
+        where: { symbol: dp.symbol },
+      });
+    }
     if (!security) continue;
 
     const parts = dp.date.split("-");
@@ -254,9 +259,24 @@ async function getOrCreateSecurity(ibkrSymbol: string, exchange: string, descrip
   const type = mapIbkrAssetClass(assetClass || "STK");
   const mult = getMultiplier({ type, multiplier });
 
-  const existing = await db.security.findUnique({
+  let existing = await db.security.findUnique({
     where: { symbol_exchange: { symbol: ibkrSymbol, exchange } },
   });
+
+  if (!existing) {
+    existing = await db.security.findFirst({
+      where: { symbol: ibkrSymbol },
+    });
+    if (existing && exchange && existing.exchange !== exchange) {
+      const listingExchanges = new Set(["NASDAQ", "NYSE", "CBOE", "BATS", "SFB", "SEHK", "SSE", "SZSE"]);
+      if (listingExchanges.has(exchange.toUpperCase()) || !listingExchanges.has((existing.exchange || "").toUpperCase())) {
+        existing = await db.security.update({
+          where: { id: existing.id },
+          data: { exchange },
+        });
+      }
+    }
+  }
 
   if (existing) {
     if (Number(existing.multiplier) !== mult) {

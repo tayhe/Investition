@@ -38,6 +38,7 @@ interface PositionRankItem {
   name: string;
   pnl: number;
   contribution: number;
+  changePercent?: number;
 }
 
 interface DailyPositionEntry {
@@ -119,65 +120,174 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
   // Position ranking based on selection
   const filteredPositionRanking = useMemo(() => {
     if (view === "month") {
-      if (!selectedDay) return positionRanking;
+      if (!selectedDay) {
+        // Aggregate for viewMonth
+        const monthDates = Object.keys(dailyPositions)
+          .filter((d) => d.startsWith(viewMonth))
+          .sort();
+        if (monthDates.length <= 1) return positionRanking;
+
+        const firstDate = monthDates[0];
+        const monthStartVal = snapshots.find((s) => s.date === firstDate || s.date.startsWith(viewMonth))?.value || 0;
+
+        const symbolMap = new Map<string, {
+          symbol: string;
+          name: string;
+          pnl: number;
+          firstPrice: number;
+          lastPrice: number;
+        }>();
+
+        for (let i = 1; i < monthDates.length; i++) {
+          const prevD = monthDates[i - 1];
+          const curD = monthDates[i];
+          const prevPositions = dailyPositions[prevD] || [];
+          const curPositions = dailyPositions[curD] || [];
+          const prevMap = new Map(prevPositions.map((p) => [p.symbol, p]));
+
+          for (const cur of curPositions) {
+            const prev = prevMap.get(cur.symbol);
+            if (!prev || prev.marketPrice <= 0) continue;
+            const priceDiff = cur.marketPrice - prev.marketPrice;
+            const factor = Math.abs(cur.marketValue) / (cur.marketPrice * Math.abs(cur.quantity) || 1);
+            const pnl = priceDiff * cur.quantity * factor;
+
+            const existing = symbolMap.get(cur.symbol) || {
+              symbol: cur.symbol,
+              name: cur.name,
+              pnl: 0,
+              firstPrice: prev.marketPrice,
+              lastPrice: cur.marketPrice,
+            };
+            existing.pnl += pnl;
+            existing.lastPrice = cur.marketPrice;
+            symbolMap.set(cur.symbol, existing);
+          }
+        }
+
+        const list = Array.from(symbolMap.values())
+          .filter((item) => Math.abs(item.pnl) >= 0.01)
+          .map((item) => {
+            const changePercent = item.firstPrice > 0 ? ((item.lastPrice - item.firstPrice) / item.firstPrice) * 100 : 0;
+            const contribution = monthStartVal > 0 ? (item.pnl / monthStartVal) * 100 : 0;
+            return {
+              symbol: item.symbol,
+              name: item.name,
+              pnl: item.pnl,
+              changePercent,
+              contribution,
+            };
+          })
+          .sort((a, b) => b.pnl - a.pnl);
+
+        return list.length > 0 ? list : positionRanking;
+      }
+
+      // Specific day selected
       const dayPositions = dailyPositions[selectedDay];
       if (!dayPositions || dayPositions.length === 0) return [];
 
-      // Find the previous trading day in the dataset
       const allDates = Object.keys(dailyPositions).sort();
       const prevDateIdx = allDates.indexOf(selectedDay) - 1;
       const prevPositions = prevDateIdx >= 0 ? dailyPositions[allDates[prevDateIdx]] : [];
       const prevMap = new Map(prevPositions.map((p) => [p.symbol, p]));
 
+      const prevDate = prevDateIdx >= 0 ? allDates[prevDateIdx] : null;
+      const prevPortfolioTotal = prevDate
+        ? snapshots.find((s) => s.date === prevDate)?.value || 0
+        : 0;
+
       const pnlList = dayPositions
         .map((p) => {
           const prev = prevMap.get(p.symbol);
-          // If held previously, compute daily price change * quantity
-          const pnl = prev && prev.marketPrice > 0
-            ? (p.marketPrice - prev.marketPrice) * p.quantity * (p.marketValue / (p.marketPrice * p.quantity || 1))
-            : 0;
-          return { symbol: p.symbol, name: p.name, pnl, contribution: 0 };
+          if (!prev || prev.marketPrice <= 0) return null;
+          const priceDiff = p.marketPrice - prev.marketPrice;
+          const changePercent = (priceDiff / prev.marketPrice) * 100;
+          const factor = Math.abs(p.marketValue) / (p.marketPrice * Math.abs(p.quantity) || 1);
+          const pnl = priceDiff * p.quantity * factor;
+          const contribution = prevPortfolioTotal > 0 ? (pnl / prevPortfolioTotal) * 100 : 0;
+          return {
+            symbol: p.symbol,
+            name: p.name,
+            pnl,
+            changePercent,
+            contribution,
+          };
         })
-        .filter((p) => p.pnl !== 0)
+        .filter((p): p is NonNullable<typeof p> => p !== null && Math.abs(p.pnl) >= 0.005)
         .sort((a, b) => b.pnl - a.pnl);
 
-      const totalPnlAbs = pnlList.reduce((sum, p) => sum + Math.abs(p.pnl), 0);
-      for (const p of pnlList) {
-        p.contribution = totalPnlAbs > 0 ? (p.pnl / totalPnlAbs) * 100 : 0;
-      }
       return pnlList.length > 0 ? pnlList : positionRanking;
     } else {
-      if (!selectedMonth) return positionRanking;
-      const monthDates = Object.keys(dailyPositions)
-        .filter((d) => d.startsWith(selectedMonth))
+      // view === "year"
+      const targetYear = String(viewYear);
+      const targetMonth = selectedMonth;
+
+      const targetDates = Object.keys(dailyPositions)
+        .filter((d) => (targetMonth ? d.startsWith(targetMonth) : d.startsWith(targetYear)))
         .sort();
 
-      if (monthDates.length === 0) return [];
-      const firstDate = monthDates[0];
-      const lastDate = monthDates[monthDates.length - 1];
+      if (targetDates.length <= 1) return positionRanking;
 
-      const firstPositions = dailyPositions[firstDate] || [];
-      const lastPositions = dailyPositions[lastDate] || [];
-      const firstMap = new Map(firstPositions.map((p) => [p.symbol, p]));
+      const firstDate = targetDates[0];
+      const startSnapshot = snapshots.find(
+        (s) => s.date === firstDate || (targetMonth ? s.date.startsWith(targetMonth) : s.date.startsWith(targetYear))
+      );
+      const startVal = startSnapshot?.value || 0;
 
-      const pnlList = lastPositions
-        .map((p) => {
-          const first = firstMap.get(p.symbol);
-          const pnl = first && first.marketPrice > 0
-            ? (p.marketPrice - first.marketPrice) * p.quantity * (p.marketValue / (p.marketPrice * p.quantity || 1))
-            : 0;
-          return { symbol: p.symbol, name: p.name, pnl, contribution: 0 };
+      const symbolMap = new Map<string, {
+        symbol: string;
+        name: string;
+        pnl: number;
+        firstPrice: number;
+        lastPrice: number;
+      }>();
+
+      for (let i = 1; i < targetDates.length; i++) {
+        const prevD = targetDates[i - 1];
+        const curD = targetDates[i];
+        const prevPositions = dailyPositions[prevD] || [];
+        const curPositions = dailyPositions[curD] || [];
+        const prevMap = new Map(prevPositions.map((p) => [p.symbol, p]));
+
+        for (const cur of curPositions) {
+          const prev = prevMap.get(cur.symbol);
+          if (!prev || prev.marketPrice <= 0) continue;
+          const priceDiff = cur.marketPrice - prev.marketPrice;
+          const factor = Math.abs(cur.marketValue) / (cur.marketPrice * Math.abs(cur.quantity) || 1);
+          const pnl = priceDiff * cur.quantity * factor;
+
+          const existing = symbolMap.get(cur.symbol) || {
+            symbol: cur.symbol,
+            name: cur.name,
+            pnl: 0,
+            firstPrice: prev.marketPrice,
+            lastPrice: cur.marketPrice,
+          };
+          existing.pnl += pnl;
+          existing.lastPrice = cur.marketPrice;
+          symbolMap.set(cur.symbol, existing);
+        }
+      }
+
+      const list = Array.from(symbolMap.values())
+        .filter((item) => Math.abs(item.pnl) >= 0.01)
+        .map((item) => {
+          const changePercent = item.firstPrice > 0 ? ((item.lastPrice - item.firstPrice) / item.firstPrice) * 100 : 0;
+          const contribution = startVal > 0 ? (item.pnl / startVal) * 100 : 0;
+          return {
+            symbol: item.symbol,
+            name: item.name,
+            pnl: item.pnl,
+            changePercent,
+            contribution,
+          };
         })
-        .filter((p) => p.pnl !== 0)
         .sort((a, b) => b.pnl - a.pnl);
 
-      const totalPnlAbs = pnlList.reduce((sum, p) => sum + Math.abs(p.pnl), 0);
-      for (const p of pnlList) {
-        p.contribution = totalPnlAbs > 0 ? (p.pnl / totalPnlAbs) * 100 : 0;
-      }
-      return pnlList.length > 0 ? pnlList : positionRanking;
+      return list.length > 0 ? list : positionRanking;
     }
-  }, [view, selectedDay, selectedMonth, dailyPositions, positionRanking]);
+  }, [view, selectedDay, selectedMonth, viewMonth, viewYear, dailyPositions, positionRanking, snapshots]);
 
   if (snapshots.length === 0) {
     return (
@@ -323,7 +433,9 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
           <div className="bg-card border border-default rounded-xl p-6">
             <h2 className="text-lg font-semibold mb-4">
               标的盈亏排行
-              {selectedDay && <span className="text-sm font-normal text-muted ml-2">({selectedDay})</span>}
+              <span className="text-sm font-normal text-muted ml-2">
+                ({selectedDay || `${viewMonth} 全月`})
+              </span>
             </h2>
             <PositionRankList data={filteredPositionRanking} />
           </div>
@@ -400,7 +512,9 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
             <div className="bg-card border border-default rounded-xl p-6">
               <h2 className="text-lg font-semibold mb-4">
                 标的盈亏排行
-                {selectedMonth && <span className="text-sm font-normal text-muted ml-2">({selectedMonth})</span>}
+                <span className="text-sm font-normal text-muted ml-2">
+                  ({selectedMonth || `${viewYear}年 全年`})
+                </span>
               </h2>
               <PositionRankList data={filteredPositionRanking} />
             </div>
@@ -417,28 +531,105 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
 }
 
 function PositionRankList({ data }: { data: PositionRankItem[] }) {
+  const [tab, setTab] = useState<"all" | "gainers" | "losers">("all");
+
+  const gainers = useMemo(() => data.filter((d) => d.pnl > 0).sort((a, b) => b.pnl - a.pnl), [data]);
+  const losers = useMemo(() => data.filter((d) => d.pnl < 0).sort((a, b) => a.pnl - b.pnl), [data]);
+  const allSorted = useMemo(() => [...data].sort((a, b) => b.pnl - a.pnl), [data]);
+
+  const displayList = tab === "gainers" ? gainers : tab === "losers" ? losers : allSorted;
+
   if (data.length === 0) {
     return <div className="text-center py-8 text-muted">暂无数据</div>;
   }
+
   return (
-    <div className="space-y-3 max-h-[250px] overflow-y-auto">
-      {data.slice(0, 15).map((pos, i) => (
-        <div key={pos.symbol} className="flex items-center gap-3">
-          <span className="text-xs text-muted w-5 text-right">{i + 1}</span>
-          <div className="flex-1 min-w-0">
-            <div className="flex justify-between text-sm">
-              <span className="font-medium">{pos.symbol}</span>
-              <span className={pos.pnl >= 0 ? "text-green" : "text-red"}>
-                {pos.pnl >= 0 ? "+" : ""}${pos.pnl.toFixed(0)}
-              </span>
-            </div>
-            <div className="flex justify-between text-xs text-muted mt-0.5">
-              <span>{pos.name}</span>
-              <span>贡献 {pos.contribution >= 0 ? "+" : ""}{pos.contribution.toFixed(1)}%</span>
-            </div>
+    <div>
+      <div className="flex items-center gap-1 mb-3 bg-muted/40 p-1 rounded-lg w-fit text-xs">
+        <button
+          type="button"
+          onClick={() => setTab("all")}
+          className={`px-3 py-1 rounded-md transition-colors font-medium ${
+            tab === "all" ? "bg-card text-foreground shadow-sm" : "text-muted hover:text-foreground"
+          }`}
+        >
+          全部 ({data.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("gainers")}
+          className={`px-3 py-1 rounded-md transition-colors font-medium ${
+            tab === "gainers" ? "bg-card text-green shadow-sm" : "text-muted hover:text-foreground"
+          }`}
+        >
+          盈利榜 ({gainers.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("losers")}
+          className={`px-3 py-1 rounded-md transition-colors font-medium ${
+            tab === "losers" ? "bg-card text-red shadow-sm" : "text-muted hover:text-foreground"
+          }`}
+        >
+          亏损榜 ({losers.length})
+        </button>
+      </div>
+
+      <div className="space-y-1.5 max-h-[350px] overflow-y-auto pr-1">
+        {displayList.length === 0 ? (
+          <div className="text-center py-8 text-xs text-muted">
+            {tab === "gainers" ? "当前周期无盈利标的" : "当前周期无亏损标的"}
           </div>
-        </div>
-      ))}
+        ) : (
+          displayList.map((pos, i) => (
+            <div
+              key={pos.symbol}
+              className="flex items-center gap-3 py-2 px-2.5 rounded-lg hover:bg-muted/30 transition-colors"
+            >
+              <span
+                className={`text-xs font-semibold w-5 text-center ${
+                  i < 3 && tab === "gainers"
+                    ? "text-green font-bold"
+                    : i < 3 && tab === "losers"
+                    ? "text-red font-bold"
+                    : "text-muted"
+                }`}
+              >
+                {i + 1}
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="flex justify-between items-center text-sm">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-semibold truncate max-w-[150px] sm:max-w-none">{pos.symbol}</span>
+                    {pos.changePercent !== undefined && (
+                      <span
+                        className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                          pos.changePercent >= 0 ? "bg-green/10 text-green" : "bg-red/10 text-red"
+                        }`}
+                        title="标的自身价格涨跌幅"
+                      >
+                        {pos.changePercent >= 0 ? "+" : ""}
+                        {pos.changePercent.toFixed(2)}%
+                      </span>
+                    )}
+                  </div>
+                  <span className={`font-semibold ${pos.pnl >= 0 ? "text-green" : "text-red"}`}>
+                    {pos.pnl >= 0 ? "+" : ""}${pos.pnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-xs text-muted mt-0.5">
+                  <span className="truncate max-w-[200px]" title={pos.name}>
+                    {pos.name}
+                  </span>
+                  <span title="对投资组合总资产收益率的拉动点数（贡献度）">
+                    拉动 {pos.contribution >= 0 ? "+" : ""}{pos.contribution.toFixed(2)}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { StatCard } from "@/components/stat-card";
 import { EquityCurve } from "./_components/equity-curve";
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, getToday } from "@/lib/utils";
 import { getLatestPrices } from "@/lib/prices/cache";
 import { calculateRealizedPnl } from "@/lib/ibkr/fifo";
 import { parseCashFlowsByDate } from "@/lib/ibkr/flex";
@@ -21,8 +21,10 @@ async function getDashboardData() {
   const accountIds = accounts.map((a) => a.id);
   const baseCurrency = accounts[0].currency || "USD";
 
-  const now = new Date();
-  const yearStart = new Date(Date.UTC(now.getFullYear(), 0, 1));
+  const today = getToday();
+  const currentYear = today.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(currentYear, 0, 1));
+  const yearStartStr = `${currentYear}-01-01`;
 
   const [positions, snapshots, rates, realizedMap, flexCaches] = await Promise.all([
     db.position.findMany({
@@ -69,36 +71,93 @@ async function getDashboardData() {
     realizedPnl += convertCurrency(amt, cur, baseCurrency, rates);
   }
 
-  const totalPnl = realizedPnl + unrealizedPnl;
+  const totalTradePnl = realizedPnl + unrealizedPnl;
 
-  // Calculate cumulative net deposits (出入金) across accounts
+  // Calculate net deposits (出入金) across accounts for current year
   let netDeposits = 0;
+  const cashFlowsByAccountDate = new Map<string, Map<string, number>>();
   for (const fc of flexCaches) {
     const flows = parseCashFlowsByDate(fc.xml);
+    cashFlowsByAccountDate.set(fc.accountId, flows);
     const acc = accounts.find((a) => a.id === fc.accountId);
     const cur = acc?.currency || baseCurrency;
-    for (const amt of flows.values()) {
-      netDeposits += convertCurrency(amt, cur, baseCurrency, rates);
+    for (const [dateStr, amt] of flows.entries()) {
+      if (dateStr >= yearStartStr) {
+        netDeposits += convertCurrency(amt, cur, baseCurrency, rates);
+      }
     }
   }
 
-  // Group snapshots by date across accounts, summing values converted to base currency
-  const dateSnapshotMap = new Map<string, number>();
+  // Group snapshots by date across accounts
   const accountCurrencyMap = new Map(accounts.map((a) => [a.id, a.currency]));
+  const dateMap = new Map<string, { totalValue: number; cashFlow: number }>();
 
   for (const s of snapshots) {
     const dateKey = s.date.toISOString().split("T")[0];
     const accCurrency = s.currency || accountCurrencyMap.get(s.accountId) || baseCurrency;
     const val = convertCurrency(Number(s.totalValue), accCurrency, baseCurrency, rates);
-    dateSnapshotMap.set(dateKey, (dateSnapshotMap.get(dateKey) || 0) + val);
+
+    const accountFlows = cashFlowsByAccountDate.get(s.accountId);
+    const rawFlow = accountFlows?.get(dateKey) || 0;
+    const flow = convertCurrency(rawFlow, accCurrency, baseCurrency, rates);
+
+    const existing = dateMap.get(dateKey) || { totalValue: 0, cashFlow: 0 };
+    existing.totalValue += val;
+    existing.cashFlow += flow;
+    dateMap.set(dateKey, existing);
+  }
+
+  // Ensure latest live totalValue is reflected on the current date
+  const todayKey = today.toISOString().split("T")[0];
+  const existingToday = dateMap.get(todayKey);
+  if (existingToday) {
+    existingToday.totalValue = totalValue;
+  } else {
+    const accountFlowsToday = accounts.reduce((sum, a) => {
+      const f = cashFlowsByAccountDate.get(a.id)?.get(todayKey) || 0;
+      return sum + convertCurrency(f, a.currency, baseCurrency, rates);
+    }, 0);
+    dateMap.set(todayKey, { totalValue, cashFlow: accountFlowsToday });
+  }
+
+  const sortedDates = Array.from(dateMap.keys()).sort();
+
+  let initialValue = 0;
+  let ytdPnl = totalTradePnl;
+  let ytdReturn = 0;
+
+  if (sortedDates.length > 0) {
+    const firstDateStr = sortedDates[0];
+    initialValue = dateMap.get(firstDateStr)!.totalValue;
+
+    // Time-weighted return (TWR)
+    let twrFactor = 1;
+    for (let idx = 1; idx < sortedDates.length; idx++) {
+      const prevDate = sortedDates[idx - 1];
+      const curDate = sortedDates[idx];
+      const prevVal = dateMap.get(prevDate)!.totalValue;
+      const curData = dateMap.get(curDate)!;
+      const flow = curData.cashFlow;
+
+      const dailyPnl = curData.totalValue - prevVal - flow;
+      const dailyReturn = prevVal > 0 ? dailyPnl / prevVal : 0;
+      twrFactor *= (1 + dailyReturn);
+    }
+
+    if (sortedDates.length > 1) {
+      ytdPnl = totalValue - initialValue - netDeposits;
+      ytdReturn = (twrFactor - 1) * 100;
+    } else {
+      const totalCost = totalValue - totalTradePnl;
+      ytdReturn = Math.abs(totalCost) > 0 ? (totalTradePnl / Math.abs(totalCost)) * 100 : 0;
+    }
   }
 
   // Monthly aggregated curve data (take the latest day in each month)
   const monthlySnapshots = new Map<string, number>();
-  const sortedDates = Array.from(dateSnapshotMap.keys()).sort();
   for (const dateStr of sortedDates) {
     const month = dateStr.slice(0, 7);
-    monthlySnapshots.set(month, dateSnapshotMap.get(dateStr)!);
+    monthlySnapshots.set(month, dateMap.get(dateStr)!.totalValue);
   }
 
   const curveData = Array.from(monthlySnapshots.entries())
@@ -109,14 +168,21 @@ async function getDashboardData() {
     ? Math.max(0, ...snapshots.map((s) => Number(s.maxDrawdown ?? 0)))
     : 0;
 
+  const totalCapital = initialValue + netDeposits;
+  const simpleReturn = totalCapital > 0 ? (ytdPnl / totalCapital) * 100 : 0;
+
   return {
     snapshots: curveData,
     stats: {
       totalValue,
       positionsValue,
       positionRatio,
+      initialValue,
       netDeposits,
-      totalPnl,
+      totalCapital,
+      totalPnl: ytdPnl,
+      ytdReturn,
+      simpleReturn,
       realizedPnl,
       unrealizedPnl,
       cashBalance,
@@ -144,8 +210,12 @@ export default async function Dashboard() {
     );
   }
 
-  const totalCost = stats.totalValue - stats.totalPnl;
-  const changePercent = Math.abs(totalCost) > 0 ? (stats.totalPnl / Math.abs(totalCost)) * 100 : 0;
+  const capitalSubtitle =
+    stats.initialValue > 0
+      ? stats.netDeposits >= 0
+        ? `期初 ${formatCurrency(stats.initialValue, stats.currency)} + 净入金 ${formatCurrency(stats.netDeposits, stats.currency)}`
+        : `期初 ${formatCurrency(stats.initialValue, stats.currency)} - 净出金 ${formatCurrency(Math.abs(stats.netDeposits), stats.currency)}`
+      : `净入金 ${formatCurrency(stats.netDeposits, stats.currency)}`;
 
   return (
     <div className="space-y-8">
@@ -161,16 +231,25 @@ export default async function Dashboard() {
           subtitle={`仓位 ${stats.positionRatio.toFixed(1)}% · 现金 ${formatCurrency(stats.cashBalance, stats.currency)}`}
         />
         <StatCard
-          title="出入金"
-          value={`${stats.netDeposits >= 0 ? "+" : ""}${formatCurrency(stats.netDeposits, stats.currency)}`}
-          subtitle="累计净入金"
+          title="年内总本金"
+          value={formatCurrency(stats.totalCapital, stats.currency)}
+          subtitle={capitalSubtitle}
         />
         <StatCard
-          title="总盈亏"
+          title="今年总盈亏"
           value={`${stats.totalPnl >= 0 ? "+" : ""}${formatCurrency(stats.totalPnl, stats.currency)}`}
           subtitle={`已实现 ${stats.realizedPnl >= 0 ? "+" : ""}${formatCurrency(stats.realizedPnl, stats.currency)} · 未实现 ${stats.unrealizedPnl >= 0 ? "+" : ""}${formatCurrency(stats.unrealizedPnl, stats.currency)}`}
-          change={`${stats.totalPnl >= 0 ? "+" : ""}${changePercent.toFixed(2)}%`}
-          changePositive={stats.totalPnl >= 0}
+          change={
+            <span className="font-bold flex flex-wrap items-center gap-x-1.5">
+              <span title="时间加权收益率 (TWR)，反映组合真实投资能力，剔除出入金干扰">
+                TWR {stats.ytdReturn >= 0 ? "+" : ""}{stats.ytdReturn.toFixed(2)}%
+              </span>
+              <span className="text-muted/60 font-normal">·</span>
+              <span title="简单收益率 = 今年总盈亏 / 年内总本金">
+                简单 {stats.simpleReturn >= 0 ? "+" : ""}{stats.simpleReturn.toFixed(2)}%
+              </span>
+            </span>
+          }
         />
         <StatCard
           title="持仓数"

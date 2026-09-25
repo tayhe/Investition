@@ -46,23 +46,27 @@ async function getAnalyticsData() {
   const priceMap = await getLatestPrices(securityIds);
 
   // Current position P&L ranking (USD)
+  let totalPortfolioValue = 0;
   const positionRanking = positions
     .map((pos) => {
       const price = priceMap.get(pos.securityId);
       const metrics = calculatePositionMetrics(pos, price);
       const usdPnl = convertCurrency(metrics.pnl, pos.currency, "USD", rates);
+      const usdMarketValue = convertCurrency(metrics.marketValue, pos.currency, "USD", rates);
+      totalPortfolioValue += usdMarketValue;
+      const changePercent = metrics.costBasis !== 0 ? (metrics.pnl / Math.abs(metrics.costBasis)) * 100 : 0;
       return {
         symbol: pos.security.symbol,
         name: pos.security.name,
         pnl: usdPnl,
+        changePercent,
         contribution: 0,
       };
     })
     .sort((a, b) => b.pnl - a.pnl);
 
-  const totalAbsPnl = positionRanking.reduce((sum, p) => sum + Math.abs(p.pnl), 0);
   for (const p of positionRanking) {
-    p.contribution = totalAbsPnl > 0 ? (p.pnl / totalAbsPnl) * 100 : 0;
+    p.contribution = totalPortfolioValue > 0 ? (p.pnl / totalPortfolioValue) * 100 : 0;
   }
 
   // Parse external cash flows (deposits/withdrawals) by account and date

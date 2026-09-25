@@ -3,8 +3,8 @@ import { cn } from "@/lib/utils";
 interface StatCardProps {
   title: string;
   value: string;
-  subtitle?: string;
-  change?: string;
+  subtitle?: React.ReactNode;
+  change?: React.ReactNode;
   changePositive?: boolean;
   className?: string;
 }
@@ -26,7 +26,7 @@ export function StatCard({
         <div
           className={cn(
             "text-sm mt-2 font-medium",
-            changePositive ? "text-green" : "text-red"
+            changePositive !== undefined && (changePositive ? "text-green" : "text-red")
           )}
         >
           {change}

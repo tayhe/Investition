@@ -170,7 +170,7 @@ export function parseFlexXml(xml: string): FlexReport {
       transactionId: attrs.transactionId || attrs.tradeID || "",
       symbol: attrs.symbol || "",
       description: attrs.description || "",
-      exchange: attrs.exchange || "",
+      exchange: attrs.listingExchange || attrs.exchange || "",
       tradeDate,
       tradeTime,
       buySell: (attrs.buySell as "BUY" | "SELL") || "BUY",
@@ -215,7 +215,7 @@ export function parseFlexXml(xml: string): FlexReport {
       attrs.markPrice || attrs.closePrice || attrs.marketPrice || "0"
     );
     const marketValue = parseFloat(
-      attrs.positionValue || attrs.value || attrs.marketValue || "0"
+      attrs.positionValueInBase || attrs.positionValue || attrs.value || attrs.marketValue || "0"
     );
     const multiplier = parseFloat(attrs.multiplier || "1");
     let averageCost = parseFloat(
@@ -396,7 +396,7 @@ export function parseAllDailyPositions(xml: string): DailyPositionData[] {
       const symbol = attrs.symbol || "";
       const exchange = attrs.listingExchange || attrs.exchange || "";
       const marketPrice = parseFloat(attrs.markPrice || attrs.closePrice || attrs.marketPrice || "0");
-      const marketValue = parseFloat(attrs.positionValue || attrs.value || attrs.marketValue || "0");
+      const marketValue = parseFloat(attrs.positionValueInBase || attrs.positionValue || attrs.value || attrs.marketValue || "0");
       const key = `${stmtDate}_${symbol}_${exchange}`;
 
       const existing = dailyMap.get(key);
@@ -522,7 +522,7 @@ export function parseAllDailySnapshots(xml: string): DailySnapshotData[] {
     let posMatch;
     while ((posMatch = posRegex.exec(stmtXml)) !== null) {
       const attrs = parseXmlAttributes(posMatch[1] || posMatch[2]);
-      const pv = parseFloat(attrs.positionValue || attrs.value || attrs.marketValue || "0");
+      const pv = parseFloat(attrs.positionValueInBase || attrs.positionValue || attrs.value || attrs.marketValue || "0");
       posVal += pv;
     }
 
