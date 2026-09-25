@@ -137,6 +137,11 @@ pnl          = marketValue - costBasis（统一代数公式，做多做空无需
 - **时间加权收益率 (TWR)**：`R = ∏(1 + dailyReturn) - 1`
 - **非交易日防护**：周末及美股休市日不写入空快照，避免打断连续净值曲线。
 
+### 标的历史交易抽屉与 Trades API
+
+- **接口**：`GET /api/trades?symbol=&year=`，严格按 session 用户所属账户隔离，年份默认使用 `getToday().getUTCFullYear()`，按 `executedAt: "desc"` 排序。
+- **抽屉组件**：`TradeHistoryDrawer`，突出显示买入/卖出均价，次行显示数量，根据标的类型（`securityType`）自动匹配单位（股票/ETF 为「股」，期权/期货为「手」，基金为「份」，债券为「张」）。
+
 ### Yahoo Finance 符号映射
 
 - 外汇对：`USD.CNH` → `USDCNH=X`
@@ -153,7 +158,7 @@ src/
 │   │   ├── _components/          # 仪表盘专属组件（EquityCurve）
 │   │   ├── layout.tsx            # 侧边栏 + SessionProvider + auth 检查
 │   │   ├── page.tsx              # 仪表盘
-│   │   ├── portfolio/            # 持仓管理（_components/ 含 PositionsTable）
+│   │   ├── portfolio/            # 持仓管理（_components/ 含 PositionsTable, TradeHistoryDrawer）
 │   │   ├── transactions/         # 交易记录
 │   │   ├── analytics/            # 复盘分析（_components/ 含 AnalyticsCharts）
 │   │   ├── accounts/             # 账户管理（_components/ 含 AccountManager 等）
@@ -199,6 +204,7 @@ prisma/
 - ✅ CSV 导入（Schwab/IBKR/通用）
 - ✅ 暗色模式 + 账户管理
 - ✅ NY 时区统一（getToday()）
+- ✅ 持仓标的历史成交抽屉（点击查看年度买卖记录、均价/股数统计、标的类型单位自适应）
 - ❌ 无注册页面
 - ❌ 无 Schwab API 集成
 

@@ -40,6 +40,7 @@ async function getPortfolioData() {
       symbol: pos.security.symbol,
       name: pos.security.name,
       market: pos.security.market,
+      type: pos.security.type,
       quantity: metrics.quantity,
       avgCost: metrics.avgCost,
       currentPrice: metrics.currentPrice,
