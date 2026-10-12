@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { getLatestPrices } from "@/lib/prices/cache";
-import { parseCashFlowsByDate } from "@/lib/ibkr/flex";
+import { parseCashFlowsByDate, parseCommissionsByDate } from "@/lib/ibkr/flex";
 import { convertCurrency, getLatestRatesMap } from "@/lib/prices/exchange-rate";
 import { AnalyticsCharts } from "./_components/analytics-charts";
 import { calculatePositionMetrics } from "@/lib/portfolio/calc";
@@ -22,7 +22,7 @@ async function getAnalyticsData() {
   const accountIds = accounts.map((a) => a.id);
   const baseCurrency = accounts[0].currency || "USD";
 
-  const [snapshots, positions, dailyPositions, rates, flexCaches] = await Promise.all([
+  const [snapshots, positions, dailyPositions, rates, flexCaches, trades] = await Promise.all([
     db.snapshot.findMany({
       where: { accountId: { in: accountIds } },
       orderBy: { date: "asc" },
@@ -39,6 +39,10 @@ async function getAnalyticsData() {
     getLatestRatesMap(),
     db.flexCache.findMany({
       where: { accountId: { in: accountIds } },
+    }),
+    db.trade.findMany({
+      where: { accountId: { in: accountIds } },
+      select: { accountId: true, executedAt: true, commission: true, currency: true },
     }),
   ]);
 
@@ -76,6 +80,43 @@ async function getAnalyticsData() {
     cashFlowsByAccountDate.set(fc.accountId, flows);
   }
 
+  // Parse trade commissions by date and month
+  const flexAccountIds = new Set(flexCaches.map((fc) => fc.accountId));
+  const nonFlexTrades = trades.filter((t) => !flexAccountIds.has(t.accountId));
+
+  const commByDate = new Map<string, { commission: number; tradeCount: number }>();
+  const commByMonth = new Map<string, { commission: number; tradeCount: number }>();
+
+  const recordCommission = (dateStr: string, comm: number, count = 1) => {
+    if (!dateStr || dateStr.length < 10) return;
+    const curDate = commByDate.get(dateStr) || { commission: 0, tradeCount: 0 };
+    curDate.commission += comm;
+    curDate.tradeCount += count;
+    commByDate.set(dateStr, curDate);
+
+    const monthStr = dateStr.slice(0, 7);
+    const curMonth = commByMonth.get(monthStr) || { commission: 0, tradeCount: 0 };
+    curMonth.commission += comm;
+    curMonth.tradeCount += count;
+    commByMonth.set(monthStr, curMonth);
+  };
+
+  for (const fc of flexCaches) {
+    const acc = accounts.find((a) => a.id === fc.accountId);
+    const accCurrency = acc?.currency || baseCurrency;
+    const dateCommMap = parseCommissionsByDate(fc.xml);
+    for (const [dateStr, val] of dateCommMap.entries()) {
+      const commInBase = convertCurrency(val.commission, accCurrency, baseCurrency, rates);
+      recordCommission(dateStr, commInBase, val.tradeCount);
+    }
+  }
+
+  for (const t of nonFlexTrades) {
+    const dateStr = t.executedAt.toISOString().split("T")[0];
+    const comm = convertCurrency(Number(t.commission || 0), t.currency, baseCurrency, rates);
+    recordCommission(dateStr, comm, 1);
+  }
+
   // Combine multi-account snapshots by date
   const accountCurrencyMap = new Map(accounts.map((a) => [a.id, a.currency]));
   const dateMap = new Map<string, { totalValue: number; cashFlow: number }>();
@@ -111,12 +152,16 @@ async function getAnalyticsData() {
       if (dd > runningMaxDrawdown) runningMaxDrawdown = dd;
     }
 
+    const dateComm = commByDate.get(dateStr) || { commission: 0, tradeCount: 0 };
+
     return {
       date: dateStr,
       value: data.totalValue,
       dailyReturn,
       dailyPnl,
       cashFlow: data.cashFlow,
+      commission: dateComm.commission,
+      tradeCount: dateComm.tradeCount,
       maxDrawdown: runningMaxDrawdown,
     };
   });
@@ -154,6 +199,7 @@ async function getAnalyticsData() {
         twrFactor *= (1 + ret / 100);
       }
       const returnRate = (twrFactor - 1) * 100;
+      const mComm = commByMonth.get(month) || { commission: 0, tradeCount: 0 };
 
       return {
         month,
@@ -164,6 +210,8 @@ async function getAnalyticsData() {
         cashFlow: data.cashFlow,
         pnl: data.pnl,
         returnRate,
+        commission: mComm.commission,
+        tradeCount: mComm.tradeCount,
       };
     });
 

@@ -19,6 +19,8 @@ interface SnapshotData {
   dailyReturn: number | null;
   dailyPnl: number | null;
   cashFlow?: number | null;
+  commission?: number;
+  tradeCount?: number;
   maxDrawdown: number | null;
 }
 
@@ -31,6 +33,8 @@ interface MonthlyItem {
   cashFlow: number;
   pnl: number;
   returnRate: number;
+  commission?: number;
+  tradeCount?: number;
 }
 
 interface PositionRankItem {
@@ -82,6 +86,8 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
   const monthSnapshots = snapshots.filter((s) => s.date.startsWith(viewMonth));
   const monthNetFlow = monthSnapshots.reduce((sum, s) => sum + (s.cashFlow ?? 0), 0);
   const monthPnl = monthSnapshots.reduce((sum, s) => sum + (s.dailyPnl ?? 0), 0);
+  const monthCommission = monthSnapshots.reduce((sum, s) => sum + (s.commission ?? 0), 0);
+  const monthTradeCount = monthSnapshots.reduce((sum, s) => sum + (s.tradeCount ?? 0), 0);
   let monthTwr = 1;
   for (const s of monthSnapshots) {
     monthTwr *= (1 + (s.dailyReturn ?? 0) / 100);
@@ -96,6 +102,8 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
     fullDate: s.date,
     returnRate: s.dailyReturn ?? 0,
     pnl: s.dailyPnl ?? 0,
+    commission: s.commission ?? 0,
+    tradeCount: s.tradeCount ?? 0,
   }));
 
   const yearSnapshots = snapshots.filter((s) => s.date.startsWith(String(viewYear)));
@@ -111,10 +119,17 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
     : 0;
 
   const filteredMonthlyData = monthlyData.filter((m) => m.month.startsWith(String(viewYear)));
+  const yearCommission = filteredMonthlyData.reduce((sum, m) => sum + (m.commission ?? 0), 0);
+  const yearTradeCount = filteredMonthlyData.reduce((sum, m) => sum + (m.tradeCount ?? 0), 0);
+  const yearMonthsCount = filteredMonthlyData.length || 1;
+
   const monthlyChartData = filteredMonthlyData.map((m) => ({
     month: m.shortLabel,
     fullMonth: m.month,
     returnRate: Number(m.returnRate.toFixed(2)),
+    pnl: m.pnl,
+    commission: m.commission ?? 0,
+    tradeCount: m.tradeCount ?? 0,
   }));
 
   // Position ranking based on selection
@@ -366,7 +381,7 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
 
       {view === "month" ? (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <StatCard
               title={`${viewMonth} 出入金`}
               value={`${monthNetFlow >= 0 ? "+" : ""}$${monthNetFlow.toFixed(2)}`}
@@ -381,6 +396,15 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
               title={`${viewMonth} 盈亏`}
               value={`${monthPnl >= 0 ? "+" : ""}$${monthPnl.toFixed(0)}`}
               changePositive={monthPnl >= 0}
+            />
+            <StatCard
+              title={`${viewMonth} 佣金`}
+              value={`$${monthCommission.toFixed(2)}`}
+              subtitle={
+                monthTradeCount > 0
+                  ? `${monthTradeCount} 笔交易 · 均单 $${(monthCommission / monthTradeCount).toFixed(2)}`
+                  : "本月无交易"
+              }
             />
             <StatCard title={`${viewMonth} 最大回撤`} value={`${monthMaxDD.toFixed(2)}%`} />
           </div>
@@ -405,8 +429,9 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
                   <Tooltip
                     contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: "8px" }}
                     formatter={(value, name, props) => {
-                      const item = props.payload;
-                      return [`${Number(value).toFixed(2)}% (${item.pnl >= 0 ? "+" : ""}$${item.pnl.toFixed(0)})`, "日收益"];
+                      const item = props?.payload;
+                      const commStr = item?.commission > 0 ? ` · 佣金 $${Number(item.commission).toFixed(2)}` : "";
+                      return [`${Number(value).toFixed(2)}% (${item.pnl >= 0 ? "+" : ""}$${item.pnl.toFixed(0)}${commStr})`, "日收益"];
                     }}
                   />
                   <Bar dataKey="returnRate" radius={[4, 4, 0, 0]}>
@@ -447,7 +472,7 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
         </>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <StatCard
               title={`${viewYear}年出入金`}
               value={`${yearNetFlow >= 0 ? "+" : ""}$${yearNetFlow.toFixed(2)}`}
@@ -462,6 +487,15 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
               title={`${viewYear}年盈亏`}
               value={`${yearPnl >= 0 ? "+" : ""}$${yearPnl.toFixed(0)}`}
               changePositive={yearPnl >= 0}
+            />
+            <StatCard
+              title={`${viewYear}年佣金`}
+              value={`$${yearCommission.toFixed(2)}`}
+              subtitle={
+                yearTradeCount > 0
+                  ? `${yearTradeCount} 笔交易 · 月均 $${(yearCommission / (yearMonthsCount || 1)).toFixed(2)}`
+                  : "全年无交易"
+              }
             />
             <StatCard title={`${viewYear}年最大回撤`} value={`${yearMaxDD.toFixed(2)}%`} />
           </div>
@@ -486,7 +520,11 @@ export function AnalyticsCharts({ snapshots, dailyPositions, monthlyData, positi
                     <YAxis stroke="var(--muted-foreground)" fontSize={12} tickFormatter={(v) => `${v}%`} />
                     <Tooltip
                       contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: "8px" }}
-                      formatter={(value) => [`${Number(value).toFixed(2)}%`, "收益率"]}
+                      formatter={(value, name, props) => {
+                        const item = props?.payload;
+                        const commStr = item?.commission > 0 ? ` · 佣金 $${Number(item.commission).toFixed(2)}` : "";
+                        return [`${Number(value).toFixed(2)}% (${item?.pnl !== undefined ? (item.pnl >= 0 ? "+" : "") + "$" + item.pnl.toFixed(0) : ""}${commStr})`, "收益率"];
+                      }}
                     />
                     <Bar dataKey="returnRate" radius={[4, 4, 0, 0]}>
                       {monthlyChartData.map((entry) => (
@@ -648,6 +686,7 @@ function DailyDetailTable({ snapshots }: { snapshots: SnapshotData[] }) {
             <th className="text-right py-3 px-4 text-sm font-medium text-muted">出入金</th>
             <th className="text-right py-3 px-4 text-sm font-medium text-muted">日盈亏</th>
             <th className="text-right py-3 px-4 text-sm font-medium text-muted">日收益率</th>
+            <th className="text-right py-3 px-4 text-sm font-medium text-muted">佣金</th>
           </tr>
         </thead>
         <tbody>
@@ -663,6 +702,14 @@ function DailyDetailTable({ snapshots }: { snapshots: SnapshotData[] }) {
               </td>
               <td className={`text-right py-3 px-4 text-sm font-medium ${(s.dailyReturn ?? 0) >= 0 ? "text-green" : "text-red"}`}>
                 {(s.dailyReturn ?? 0) >= 0 ? "+" : ""}{(s.dailyReturn ?? 0).toFixed(2)}%
+              </td>
+              <td className="text-right py-3 px-4 text-sm text-muted">
+                {(s.commission ?? 0) > 0 ? (
+                  <span>
+                    ${(s.commission ?? 0).toFixed(2)}
+                    <span className="text-xs text-muted/70 ml-1">({s.tradeCount ?? 1}笔)</span>
+                  </span>
+                ) : "-"}
               </td>
             </tr>
           ))}
@@ -686,6 +733,7 @@ function MonthlyDetailTable({ data }: { data: MonthlyItem[] }) {
             <th className="text-right py-3 px-4 text-sm font-medium text-muted">出入金</th>
             <th className="text-right py-3 px-4 text-sm font-medium text-muted">期末资产</th>
             <th className="text-right py-3 px-4 text-sm font-medium text-muted">盈亏</th>
+            <th className="text-right py-3 px-4 text-sm font-medium text-muted">佣金支出</th>
             <th className="text-right py-3 px-4 text-sm font-medium text-muted">收益率</th>
           </tr>
         </thead>
@@ -700,6 +748,14 @@ function MonthlyDetailTable({ data }: { data: MonthlyItem[] }) {
               <td className="text-right py-3 px-4 text-sm">${m.endValue.toFixed(2)}</td>
               <td className={`text-right py-3 px-4 text-sm font-medium ${m.pnl >= 0 ? "text-green" : "text-red"}`}>
                 {m.pnl >= 0 ? "+" : ""}${m.pnl.toFixed(2)}
+              </td>
+              <td className="text-right py-3 px-4 text-sm text-muted">
+                {(m.commission ?? 0) > 0 ? (
+                  <span>
+                    ${(m.commission ?? 0).toFixed(2)}
+                    <span className="text-xs text-muted/70 ml-1">({m.tradeCount ?? 0}笔)</span>
+                  </span>
+                ) : "-"}
               </td>
               <td className={`text-right py-3 px-4 text-sm font-medium ${m.returnRate >= 0 ? "text-green" : "text-red"}`}>
                 {m.returnRate >= 0 ? "+" : ""}{m.returnRate.toFixed(2)}%

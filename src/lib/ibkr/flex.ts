@@ -485,6 +485,51 @@ export function parseCashFlowsByDate(xml: string): Map<string, number> {
   return flowMap;
 }
 
+/**
+ * Parses all trade commissions and trade counts by date (YYYY-MM-DD)
+ * in the account's base currency from the Flex report XML.
+ */
+export function parseCommissionsByDate(xml: string): Map<string, { commission: number; tradeCount: number }> {
+  const tradeRegex = /<Trade\s+([^>]*)\/>/g;
+  const seenKeys = new Set<string>();
+  const dateMap = new Map<string, { commission: number; tradeCount: number }>();
+
+  let match;
+  while ((match = tradeRegex.exec(xml)) !== null) {
+    const attrs = parseXmlAttributes(match[1]);
+    const ibOrderID = attrs.ibOrderID || "";
+    const buySell = attrs.buySell || "";
+    const quantity = attrs.quantity || "";
+    const tradePrice = attrs.tradePrice || "";
+    const key = ibOrderID
+      ? `${ibOrderID}_${buySell}_${quantity}_${tradePrice}`
+      : attrs.transactionID || attrs.tradeID || "";
+
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+
+    const tradeDate = attrs.tradeDate || (attrs.dateTime ? attrs.dateTime.split(";")[0] : "");
+    if (!tradeDate || tradeDate.length < 8) continue;
+    const dateStr = `${tradeDate.slice(0, 4)}-${tradeDate.slice(4, 6)}-${tradeDate.slice(6, 8)}`;
+
+    const ibCommission = Math.abs(parseFloat(attrs.ibCommission || "0"));
+    const ibCommissionCurrency = attrs.ibCommissionCurrency || "USD";
+    const fxRateToBase = parseFloat(attrs.fxRateToBase || "1");
+
+    let commInBase = ibCommission;
+    if (ibCommissionCurrency !== "USD") {
+      commInBase = ibCommission * fxRateToBase;
+    }
+
+    const cur = dateMap.get(dateStr) || { commission: 0, tradeCount: 0 };
+    cur.commission += commInBase;
+    cur.tradeCount += 1;
+    dateMap.set(dateStr, cur);
+  }
+
+  return dateMap;
+}
+
 export interface DailySnapshotData {
   date: string;
   positionsValue: number;
