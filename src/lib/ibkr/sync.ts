@@ -95,7 +95,10 @@ export async function syncAccountData(accountId: string, force = false): Promise
     const isRateLimit = errorMsg.includes("could not be generated") ||
                         errorMsg.includes("try again") ||
                         errorMsg.includes("1001") ||
-                        errorMsg.includes("1018");
+                        errorMsg.includes("1018") ||
+                        errorMsg.includes("timed out");
+
+    console.warn(`[IBKR Sync] Live fetch failed for account ${accountId}: ${errorMsg}`);
 
     if (!isMaintenance && !isLocked && !isRateLimit) throw error;
 
@@ -105,13 +108,14 @@ export async function syncAccountData(accountId: string, force = false): Promise
     });
 
     if (cached) {
+      console.warn(`[IBKR Sync] Falling back to cached data from ${cached.createdAt.toISOString()}`);
       report = parseFlexXml(cached.xml);
       rawXml = cached.xml;
       fromCache = true;
     } else {
       if (isMaintenance) throw new Error("IBKR 报告系统正在维护中，请稍后再试");
       if (isLocked) throw new Error("IBKR API 已被临时锁定（多次失败），请等待 24 小时或生成新 Token");
-      throw new Error("IBKR API 暂时不可用且无缓存数据，请稍后重试");
+      throw new Error(`IBKR API 暂时不可用且无缓存数据（${errorMsg || "未知错误"}），请稍后重试`);
     }
   }
 

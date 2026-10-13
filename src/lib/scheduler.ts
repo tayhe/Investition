@@ -95,11 +95,14 @@ export function startScheduler() {
   cron.schedule("0 */4 * * *", runExchangeRateUpdate, { timezone: "America/New_York" });
   log("Scheduled: exchange rate update every 4 hours");
 
-  cron.schedule("30 0 * * *", runIbkrSync, { timezone: "America/New_York" });
-  log("Scheduled: IBKR Flex sync daily at 00:30 NYSE time");
+  cron.schedule("0 3 * * *", runIbkrSync, { timezone: "America/New_York" });
+  log("Scheduled: IBKR Flex sync daily at 03:00 NYSE time");
 
-  cron.schedule("0 1 * * *", runDailySnapshot, { timezone: "America/New_York" });
-  log("Scheduled: daily snapshot at 01:00 NYSE time");
+  cron.schedule("0 18 * * 1-5", runIbkrSync, { timezone: "America/New_York" });
+  log("Scheduled: IBKR Flex sync post-market at 18:00 NYSE time (Mon-Fri)");
+
+  cron.schedule("30 3 * * *", runDailySnapshot, { timezone: "America/New_York" });
+  log("Scheduled: daily snapshot at 03:30 NYSE time");
 
   runPriceUpdate();
   runExchangeRateUpdate();

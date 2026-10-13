@@ -34,7 +34,7 @@ export function CronStatus() {
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted">
-        系统自动执行：每 4 小时更新价格和汇率，每日凌晨 1 点生成资产快照（纽约时间）。
+        系统自动执行：每 4 小时更新价格和汇率；美东时间每日 03:00 与工作日 18:00 自动拉取 IBKR；每日 03:30 生成资产快照。
       </p>
       <div className="flex gap-3">
         <button

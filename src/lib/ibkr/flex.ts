@@ -132,12 +132,50 @@ export async function fetchFlexReportWithXml(referenceCode: string, token: strin
   return { report: parseFlexXml(text), rawXml: text };
 }
 
+const MAX_POLL_ATTEMPTS = 12;
+const POLL_INTERVAL_MS = 5000;
+
 export async function syncIbkrFlex(config: IbkrFlexConfig): Promise<FlexSyncResult> {
   const refCode = await fetchFlexReferenceCode(config);
 
-  await new Promise((resolve) => setTimeout(resolve, 5000));
+  const params = new URLSearchParams({
+    t: config.token,
+    q: refCode,
+    v: "3",
+  });
 
-  return fetchFlexReportWithXml(refCode, config.token);
+  for (let attempt = 1; attempt <= MAX_POLL_ATTEMPTS; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+
+    const response = await fetch(`${IBKR_FLEX_BASE}/GetStatement?${params}`);
+    const text = await response.text();
+
+    if (text.includes("<ErrorMessage>")) {
+      const msgMatch = text.match(/<ErrorMessage>(.*?)<\/ErrorMessage>/);
+      const codeMatch = text.match(/<ErrorCode>(.*?)<\/ErrorCode>/);
+      const code = codeMatch ? codeMatch[1] : "";
+      const msg = msgMatch ? msgMatch[1] : "Flex report error";
+
+      const isPreparing =
+        code === "1003" ||
+        code === "1018" ||
+        msg.toLowerCase().includes("being prepared") ||
+        msg.toLowerCase().includes("try again shortly");
+
+      if (isPreparing && attempt < MAX_POLL_ATTEMPTS) {
+        console.log(
+          `[IBKR Flex] Statement is being prepared (attempt ${attempt}/${MAX_POLL_ATTEMPTS}), retrying in 5s...`
+        );
+        continue;
+      }
+
+      throw new Error(`IBKR Flex error (${code || "unknown"}): ${msg}`);
+    }
+
+    return { report: parseFlexXml(text), rawXml: text };
+  }
+
+  throw new Error("IBKR Flex report generation timed out after 60 seconds");
 }
 
 export function parseFlexXml(xml: string): FlexReport {
